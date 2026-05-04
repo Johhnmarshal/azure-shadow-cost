@@ -1,0 +1,14 @@
+// Storage accounts using zone- or geo-redundant SKUs in non-production
+// environments. Most non-prod workloads do not need GZRS / RA-GZRS; LRS
+// is ~50% cheaper. We use the Environment tag (case-insensitive) as the
+// signal, and only flag accounts where remediation is safe.
+Resources
+| where type =~ 'microsoft.storage/storageaccounts'
+| extend env       = tolower(coalesce(tostring(tags['Environment']), 'unknown'))
+| extend skuName   = tostring(sku.name)
+| extend tier      = tostring(properties.accessTier)
+| where env in ('dev','development','test','qa','staging','sandbox','nonprod','non-prod')
+| where skuName in ('Standard_GRS','Standard_GZRS','Standard_RAGRS','Standard_RAGZRS','Premium_ZRS')
+| extend owner     = coalesce(tostring(tags['Owner']), '(untagged)')
+| project id, name, resourceGroup, location, skuName, tier, env, owner, tags
+| order by skuName asc, name asc

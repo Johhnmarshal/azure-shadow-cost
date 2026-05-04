@@ -1,0 +1,16 @@
+// Log Analytics workspaces with retention > 90 days. High retention is a
+// common silent cost sink; the fix is usually 'archive tier + 30-day hot'
+// rather than a uniform 730-day retention policy.
+//
+// True 'idle' detection (ingestion but no queries in 30d) requires a join
+// with Operations Insights query usage tables — done in Python rather than
+// pure ARG so we keep this query simple here.
+Resources
+| where type =~ 'microsoft.operationalinsights/workspaces'
+| extend retentionDays = toint(properties.retentionInDays)
+| where retentionDays > 90
+| extend skuName = tostring(properties.sku.name)
+| extend owner   = coalesce(tostring(tags['Owner']), '(untagged)')
+| extend env     = coalesce(tostring(tags['Environment']), 'unknown')
+| project id, name, resourceGroup, location, retentionDays, skuName, owner, env, tags
+| order by retentionDays desc

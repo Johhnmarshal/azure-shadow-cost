@@ -1,0 +1,12 @@
+// Public IPs not attached to any IP configuration. Standard SKU IPs are
+// chargeable even when idle (~$3.65/month each); Basic SKU IPs are free
+// when idle but the SKU itself is being retired.
+Resources
+| where type =~ 'microsoft.network/publicipaddresses'
+| where isnull(properties.ipConfiguration)
+| extend sku        = tostring(sku.name)
+| extend allocation = tostring(properties.publicIPAllocationMethod)
+| extend owner      = coalesce(tostring(tags['Owner']), '(untagged)')
+| extend env        = coalesce(tostring(tags['Environment']), 'unknown')
+| project id, name, resourceGroup, location, sku, allocation, owner, env, tags
+| order by name asc

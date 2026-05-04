@@ -1,0 +1,11 @@
+fastapi==0.115.2
+uvicorn[standard]==0.32.0
+gunicorn==23.0.0
+pydantic==2.9.2
+
+azure-identity==1.19.0
+azure-mgmt-resource==23.2.0
+azure-mgmt-resourcegraph==8.0.0
+azure-mgmt-costmanagement==4.0.1
+azure-mgmt-consumption==10.0.0
+azure-mgmt-monitor==6.0.2

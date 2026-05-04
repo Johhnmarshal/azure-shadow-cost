@@ -1,0 +1,13 @@
+// Cosmos DB accounts whose throughput model and region count suggest
+// over-provisioning. This is a screening query — actual RU utilization
+// must be confirmed via Monitor metrics (done in Python).
+Resources
+| where type =~ 'microsoft.documentdb/databaseaccounts'
+| extend writeRegions = array_length(properties.writeLocations)
+| extend isMultiWrite = tobool(properties.enableMultipleWriteLocations)
+| extend env          = tolower(coalesce(tostring(tags['Environment']), 'unknown'))
+| where (isMultiWrite == true and env in ('dev','test','qa','staging','sandbox','nonprod'))
+     or (writeRegions > 1 and env in ('dev','test','qa','staging','sandbox','nonprod'))
+| extend owner = coalesce(tostring(tags['Owner']), '(untagged)')
+| project id, name, resourceGroup, location, isMultiWrite, writeRegions, env, owner, tags
+| order by writeRegions desc

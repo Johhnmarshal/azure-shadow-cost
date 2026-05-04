@@ -1,0 +1,12 @@
+// App Service Plans with zero hosted apps. Plans bill regardless of whether
+// any sites are attached, so an empty plan is pure waste.
+Resources
+| where type =~ 'microsoft.web/serverfarms'
+| extend numberOfSites = toint(properties.numberOfSites)
+| where numberOfSites == 0
+| extend skuName = tostring(sku.name)
+| extend skuTier = tostring(sku.tier)
+| extend owner   = coalesce(tostring(tags['Owner']), '(untagged)')
+| extend env     = coalesce(tostring(tags['Environment']), 'unknown')
+| project id, name, resourceGroup, location, skuName, skuTier, owner, env, tags
+| order by skuTier asc, name asc

@@ -1,0 +1,14 @@
+// Unattached managed disks. Excludes ASR replicas (still chargeable but
+// in active use). DiskState == 'Unattached' is the canonical Azure signal.
+Resources
+| where type =~ 'microsoft.compute/disks'
+| where properties.diskState == 'Unattached'
+| where isnull(properties.purchasePlan) or properties.purchasePlan.publisher != 'azure-site-recovery'
+| extend sizeGB     = toint(properties.diskSizeGB)
+| extend sku        = tostring(sku.name)
+| extend ageDays    = datetime_diff('day', now(), todatetime(properties.timeCreated))
+| extend owner      = coalesce(tostring(tags['Owner']), '(untagged)')
+| extend costCenter = coalesce(tostring(tags['CostCenter']), '(untagged)')
+| extend env        = coalesce(tostring(tags['Environment']), 'unknown')
+| project id, name, resourceGroup, location, sizeGB, sku, ageDays, owner, costCenter, env, tags
+| order by sizeGB desc

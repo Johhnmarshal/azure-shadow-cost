@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Shadow Cost — Azure FinOps Console</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111a2e; --panel2:#162039; --line:#1f2c4a;
+    --ink:#e6edf7; --ink-dim:#93a2bd; --ink-mute:#6c7a94;
+    --accent:#22d3ee; --accent2:#7c3aed; --good:#34d399; --warn:#f59e0b; --bad:#ef4444;
+    --chip-on:#0e7490; --azure:#0078d4;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:"Inter","Segoe UI",system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.45;}
+  .app{max-width:1480px;margin:0 auto;padding:20px 24px 80px}
+
+  /* Header */
+  .top{display:flex;align-items:center;gap:18px;padding-bottom:18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:36px;height:36px;border-radius:9px;
+    background:conic-gradient(from 140deg at 50% 50%,var(--azure),#22d3ee,var(--accent2));
+    display:grid;place-items:center;font-weight:800;color:#0b1220}
+  .brand h1{margin:0;font-size:18px;letter-spacing:.2px}
+  .brand p{margin:0;color:var(--ink-dim);font-size:12px}
+  .spacer{flex:1}
+  .tabs{display:flex;gap:4px;background:var(--panel);padding:4px;border-radius:10px;border:1px solid var(--line)}
+  .tab{padding:7px 12px;border:0;background:transparent;color:var(--ink-dim);border-radius:7px;cursor:pointer;font:inherit}
+  .tab.on{background:var(--chip-on);color:#e6fbff}
+
+  /* Filters */
+  .filters{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0 10px;align-items:center}
+  .filter-group{display:flex;align-items:center;gap:8px}
+  .filter-group label{color:var(--ink-mute);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  select, input{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+    padding:7px 10px;border-radius:8px;font:inherit}
+  .chips{display:flex;gap:6px;background:var(--panel);padding:4px;border-radius:999px;border:1px solid var(--line)}
+  .chip{padding:6px 12px;border:0;background:transparent;color:var(--ink-dim);border-radius:999px;cursor:pointer;font-size:12.5px;font:inherit}
+  .chip.on{background:var(--chip-on);color:#e6fbff}
+  .btn{background:var(--chip-on);color:#e6fbff;border:0;padding:7px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:12.5px}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink-dim)}
+  .btn.ghost:hover{color:#fff;border-color:var(--accent)}
+
+  /* KPI cards */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:14px 0 20px}
+  .kpi{background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
+  .kpi .label{color:var(--ink-mute);font-size:11.5px;text-transform:uppercase;letter-spacing:.7px}
+  .kpi .value{font-size:28px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+  .kpi .sub{color:var(--ink-dim);font-size:12px;margin-top:6px}
+  .kpi .trend{position:absolute;right:14px;top:14px;font-size:12px;padding:3px 8px;border-radius:999px}
+  .trend.up{background:rgba(239,68,68,.12);color:#fca5a5}
+  .trend.down{background:rgba(52,211,153,.12);color:#86efac}
+  .kpi .bar{position:absolute;left:0;bottom:0;height:3px;width:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+
+  /* Layout */
+  .grid{display:grid;grid-template-columns:1.1fr 1fr;gap:14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .panel h3{margin:0 0 4px;font-size:14px;font-weight:600}
+  .panel p.hint{margin:0 0 12px;color:var(--ink-dim);font-size:12px}
+  .chart-wrap{position:relative;height:260px}
+  .chart-wrap.tall{height:320px}
+
+  /* Findings table */
+  table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+  thead th{position:sticky;top:0;text-align:left;background:var(--panel2);color:var(--ink-dim);font-weight:600;
+    padding:10px;border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none}
+  tbody td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:hover{background:rgba(34,211,238,.04)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;white-space:nowrap}
+  .pill.low{background:rgba(52,211,153,.15);color:#86efac}
+  .pill.med{background:rgba(245,158,11,.18);color:#fcd34d}
+  .pill.high{background:rgba(239,68,68,.2);color:#fca5a5}
+  .pill.crawl{background:rgba(34,211,238,.18);color:#7dd3fc}
+  .pill.walk{background:rgba(124,58,237,.22);color:#c4b5fd}
+  .pill.run{background:rgba(236,72,153,.18);color:#fbcfe8}
+  .pill.donow{background:rgba(52,211,153,.2);color:#86efac}
+  .pill.soon{background:rgba(245,158,11,.2);color:#fcd34d}
+  .pill.back{background:rgba(148,163,184,.2);color:#cbd5e1}
+  .pill.deprio{background:rgba(100,116,139,.25);color:#94a3b8}
+  .small{color:var(--ink-dim);font-size:12px}
+  .right{text-align:right}
+  .num{font-variant-numeric:tabular-nums;font-weight:600}
+
+  /* Banners */
+  .banner{padding:12px 14px;border-radius:10px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:13px}
+  .banner.warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#fde68a}
+  .banner.info{background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);color:#a5f3fc}
+
+  /* Gauge */
+  .gauge{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%}
+  .gauge-value{font-size:40px;font-weight:800;margin-top:-60px;font-variant-numeric:tabular-nums}
+  .gauge-sub{color:var(--ink-dim);font-size:12px}
+  .gauge-target{display:flex;gap:10px;margin-top:10px;font-size:11.5px;color:var(--ink-dim)}
+  .gauge-target span b{color:var(--ink)}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;color:var(--ink-dim);font-size:12px}
+  .legend .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+
+  .hidden{display:none!important}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--ink-mute);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  @media (max-width:1100px){
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    .grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="top">
+    <div class="brand">
+      <div class="logo">S</div>
+      <div>
+        <h1>Shadow Cost</h1>
+        <p>Azure FinOps console — beyond Advisor. Detect, explain, generate safe remediation.</p>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="findings">Findings</button>
+      <button class="tab" data-tab="about">About</button>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="filter-group">
+      <label>Subscription</label>
+      <select id="subPicker"><option>Loading…</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Category</label>
+      <div class="chips" id="catChips"><button class="chip on" data-cat="all">All</button></div>
+    </div>
+    <div class="filter-group">
+      <label>Tier</label>
+      <div class="chips" id="tierChips">
+        <button class="chip on" data-tier="all">All</button>
+        <button class="chip" data-tier="Crawl">Quick Wins</button>
+        <button class="chip" data-tier="Walk">Structural</button>
+        <button class="chip" data-tier="Run">Architectural</button>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="filter-group">
+      <input id="searchBox" placeholder="Search findings…" />
+    </div>
+    <button class="btn ghost" id="refreshBtn" title="Bypass cache">Refresh</button>
+  </div>
+
+  <div id="banner"></div>
+
+  <!-- DASHBOARD -->
+  <div id="view-dashboard">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Recoverable shadow spend</div>
+        <div class="value" id="kpi-spend">—</div>
+        <div class="sub" id="kpi-spend-sub">monthly, fixable via the rec engine</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Visibility gap</div>
+        <div class="value" id="kpi-gap">—</div>
+        <div class="sub">% of recoverable spend that is untagged</div>
+        <span class="trend" id="kpi-gap-trend">target &lt;25%</span>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Findings</div>
+        <div class="value" id="kpi-count">—</div>
+        <div class="sub" id="kpi-count-sub">across all detectors</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">12-mo savings potential</div>
+        <div class="value" id="kpi-save">—</div>
+        <div class="sub">if all recommendations applied</div>
+        <div class="bar"></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <h3>Shadow spend by category</h3>
+        <p class="hint">Where the leakage lives across the four detector buckets.</p>
+        <div class="chart-wrap"><canvas id="chartCategory"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>Visibility gap</h3>
+        <p class="hint">% of recoverable spend tied to untagged or mis-tagged resources.</p>
+        <div class="chart-wrap gauge">
+          <canvas id="chartGauge" height="220"></canvas>
+          <div class="gauge-value" id="gaugeLabel">—</div>
+          <div class="gauge-sub" id="gaugeSub">—</div>
+          <div class="gauge-target">
+            <span><b style="color:#7dd3fc">Crawl</b> &lt;25%</span>
+            <span><b style="color:#c4b5fd">Walk</b> &lt;10%</span>
+            <span><b style="color:#fbcfe8">Run</b> &lt;2%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:14px;grid-template-columns:1.4fr 1fr">
+      <div class="panel">
+        <h3>ROI quadrant — savings vs. effort</h3>
+        <p class="hint">Bubble size = monthly savings. Hourly-return band colors match the rubric.</p>
+        <div class="chart-wrap tall"><canvas id="chartRoi"></canvas></div>
+        <div class="legend">
+          <span><i class="sw" style="background:#34d399"></i>Do now &gt; $1,000/hr</span>
+          <span><i class="sw" style="background:#fcd34d"></i>Do soon $250–$1k/hr</span>
+          <span><i class="sw" style="background:#cbd5e1"></i>Backlog $50–$250/hr</span>
+          <span><i class="sw" style="background:#64748b"></i>Deprioritize &lt;$50/hr</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Top shadow spenders (by owner)</h3>
+        <p class="hint">"(untagged)" rows shown in red — that's a tag-policy failure.</p>
+        <div class="chart-wrap tall"><canvas id="chartOwners"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINDINGS -->
+  <div id="view-findings" class="hidden">
+    <div class="panel">
+      <h3>Findings</h3>
+      <p class="hint">Click "Script" on any row to download a dry-run-default bash remediation script.</p>
+      <div style="overflow:auto;max-height:680px">
+        <table id="findings">
+          <thead><tr>
+            <th data-sort="category">Category</th>
+            <th data-sort="resource">Finding</th>
+            <th data-sort="owner">Owner</th>
+            <th data-sort="env">Env</th>
+            <th data-sort="savings_monthly_usd" class="right">$/mo</th>
+            <th data-sort="effort_hours" class="right">Effort</th>
+            <th data-sort="hourly" class="right">$/hr</th>
+            <th>Priority</th>
+            <th>Risk</th>
+            <th>Tier</th>
+            <th>Business value</th>
+            <th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="small" id="findings-count" style="margin-top:10px"></p>
+    </div>
+  </div>
+
+  <!-- ABOUT -->
+  <div id="view-about" class="hidden">
+    <div class="panel">
+      <h3>What this app does (and what Advisor doesn't)</h3>
+      <p>
+        Azure Advisor is excellent at the <em>utilization</em> story — idle VMs, low-use disks, RI suggestions.
+        It is largely silent on the classical FinOps shadow-cost surface:
+      </p>
+      <ul>
+        <li><b>Allocation gap</b> — resources missing required tags; the Visibility Gap %.</li>
+        <li><b>Commitment drift</b> — RIs / SPs you bought that are now under-utilised.</li>
+        <li><b>Data-plane waste</b> — over-redundant storage, long Log Analytics retention, multi-region Cosmos in non-prod.</li>
+        <li><b>PaaS sprawl</b> — empty App Service Plans, idle workspaces, dormant APIM.</li>
+      </ul>
+      <p>
+        For each detector we surface a finding card with the full FinOps ROI-engine contract — recommendation,
+        $/month, eng hours, risk, tier, and a business-value framing — and we generate a safe bash script
+        (dry-run by default) you can review and apply.
+      </p>
+      <h3 style="margin-top:18px">Detectors in this build</h3>
+      <ul>
+        <li>unattached managed disks · unused Standard public IPs · empty App Service Plans</li>
+        <li>tagging gap (per resource type)</li>
+        <li>commitment drift (Reservations / Savings Plans, last 30 days)</li>
+        <li>over-redundant non-prod storage · long Log Analytics retention · multi-region non-prod Cosmos</li>
+      </ul>
+      <p class="small">
+        Identity: <span id="me-cred">resolving…</span> · Subscription: <span id="me-sub">—</span>
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+const fmtMoney = n => n>=1e6 ? "$"+(n/1e6).toFixed(2)+"M" : n>=1e3 ? "$"+(n/1e3).toFixed(1)+"k" : "$"+n.toFixed(0);
+const fmtInt = n => n.toLocaleString();
+const tierLabel = {Crawl:"Quick Win", Walk:"Structural", Run:"Architectural"};
+const categoryColors = {
+  "Orphaned storage":"#22d3ee","Idle compute":"#a78bfa","Idle network":"#60a5fa",
+  "Orphaned network":"#f472b6","Rightsizing":"#34d399","Commitment":"#f59e0b",
+  "Storage tiering":"#fb7185","Log/obs":"#e879f9","Architectural":"#f87171",
+  "Tagging":"#fda4af","Data plane":"#22d3ee"
+};
+
+const state = { subId:null, cat:"all", tier:"all", search:"", findings:[], gap:0, tab:"dashboard", sortKey:"savings_monthly_usd", sortDir:-1 };
+const ch = {};
+
+Chart.defaults.color = "#93a2bd";
+Chart.defaults.borderColor = "rgba(147,162,189,.15)";
+Chart.defaults.font.family = "Inter,Segoe UI,system-ui,sans-serif";
+
+function destroy(id){ if(ch[id]){ ch[id].destroy(); delete ch[id]; } }
+
+function bandOf(f){
+  const r = f.savings_monthly_usd / Math.max(0.5, f.effort_hours);
+  if(r > 1000) return {key:"donow", label:"Do now", color:"#34d399"};
+  if(r >= 250) return {key:"soon",  label:"Do soon", color:"#fcd34d"};
+  if(r >= 50)  return {key:"back",  label:"Backlog", color:"#cbd5e1"};
+  return {key:"deprio", label:"Deprioritize", color:"#64748b"};
+}
+
+function applyFilters(){
+  const s = state.search.trim().toLowerCase();
+  return state.findings.filter(f=>{
+    if(state.cat !== "all" && f.category !== state.cat) return false;
+    if(state.tier !== "all" && f.tier !== state.tier) return false;
+    if(s){
+      const hay = (f.resource+" "+f.owner+" "+f.business_value+" "+f.detector+" "+f.category).toLowerCase();
+      if(!hay.includes(s)) return false;
+    }
+    return true;
+  });
+}
+
+function setBanner(html, kind="info"){
+  const el = document.getElementById("banner");
+  if(!html){ el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="banner ${kind}">${html}</div>`;
+}
+
+async function fetchJSON(url, opts){
+  const r = await fetch(url, opts);
+  if(!r.ok){ throw new Error(`${r.status} ${r.statusText} — ${await r.text()}`); }
+  return r.json();
+}
+
+async function loadSubscriptions(){
+  const sel = document.getElementById("subPicker");
+  try{
+    const subs = await fetchJSON("/api/subscriptions");
+    sel.innerHTML = subs.map(s=>`<option value="${s.subscriptionId}">${s.displayName} — ${s.subscriptionId.slice(0,8)}…</option>`).join("");
+    state.subId = subs[0]?.subscriptionId || null;
+    document.getElementById("me-sub").textContent = state.subId || "—";
+  }catch(e){
+    sel.innerHTML = `<option>Sign-in required</option>`;
+    setBanner(`Couldn't list subscriptions — your identity may not have Reader on any subscription. ${e.message}`, "warn");
+  }
+}
+
+async function loadIdentity(){
+  try{
+    const me = await fetchJSON("/api/me");
+    document.getElementById("me-cred").textContent = me.credential_class + (me.use_mock_data === "True" ? " (mock data)" : "");
+  }catch{ /* ignore */ }
+}
+
+async function loadFindings(){
+  setBanner(`<span class="spinner"></span> Running detectors…`);
+  try{
+    const data = await fetchJSON("/api/findings");
+    state.findings = data.findings || [];
+    state.gap = data.visibility_gap_pct || 0;
+    state.cachedAt = data.cached_at;
+    rebuildCategoryChips();
+    setBanner("");
+    refresh();
+  }catch(e){
+    setBanner(`Failed to load findings: ${e.message}`, "warn");
+  }
+}
+
+function rebuildCategoryChips(){
+  const cats = [...new Set(state.findings.map(f=>f.category))].sort();
+  const el = document.getElementById("catChips");
+  el.innerHTML = `<button class="chip on" data-cat="all">All</button>` +
+    cats.map(c=>`<button class="chip" data-cat="${c}">${c}</button>`).join("");
+}
+
+function renderKpis(rows){
+  const total = rows.reduce((a,f)=>a+f.savings_monthly_usd,0);
+  document.getElementById("kpi-spend").textContent = fmtMoney(total);
+  document.getElementById("kpi-spend-sub").textContent = `${rows.length} findings · ${new Set(rows.map(r=>r.owner)).size} owners`;
+  document.getElementById("kpi-gap").textContent = state.gap.toFixed(1) + "%";
+  const t = document.getElementById("kpi-gap-trend");
+  t.className = "trend " + (state.gap>25?"up":"down");
+  t.textContent = state.gap>25 ? "above Crawl" : (state.gap>10 ? "within Crawl" : state.gap>2 ? "at Walk" : "at Run");
+  document.getElementById("kpi-count").textContent = fmtInt(rows.length);
+  document.getElementById("kpi-count-sub").textContent = `cached at ${state.cachedAt || "—"}`;
+  document.getElementById("kpi-save").textContent = fmtMoney(total*12);
+}
+
+function renderCategoryChart(rows){
+  destroy("cat");
+  const groups = {};
+  rows.forEach(r => { groups[r.category] = (groups[r.category]||0) + r.savings_monthly_usd; });
+  const labels = Object.keys(groups);
+  ch.cat = new Chart(document.getElementById("chartCategory"),{
+    type:"doughnut",
+    data:{labels, datasets:[{data:labels.map(l=>groups[l]), backgroundColor:labels.map(l=>categoryColors[l]||"#22d3ee"), borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:"62%",
+      plugins:{legend:{position:"right",labels:{boxWidth:10,padding:10}},
+        tooltip:{callbacks:{label:c=>c.label+": "+fmtMoney(c.parsed)}}}}
+  });
+}
+
+function renderGauge(){
+  destroy("gauge");
+  const gap = state.gap;
+  document.getElementById("gaugeLabel").textContent = gap.toFixed(1) + "%";
+  document.getElementById("gaugeSub").textContent =
+    gap>25 ? "above Crawl — enforce tagging first"
+    : gap>10 ? "past Crawl — push toward Walk"
+    : gap>2  ? "inside Walk — enforce deny-mode"
+    : "at Run — visibility is best-in-class";
+  const pct = Math.min(gap,100);
+  ch.gauge = new Chart(document.getElementById("chartGauge"),{
+    type:"doughnut",
+    data:{datasets:[{data:[pct,100-pct],
+      backgroundColor:[gap>25?"#ef4444":gap>10?"#f59e0b":gap>2?"#22d3ee":"#34d399","#1f2c4a"],
+      borderWidth:0, circumference:180, rotation:270}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:"72%",
+      plugins:{tooltip:{enabled:false},legend:{display:false}}}
+  });
+}
+
+function renderRoi(rows){
+  destroy("roi");
+  const buckets = {donow:[], soon:[], back:[], deprio:[]};
+  rows.forEach(r => {
+    const b = bandOf(r);
+    buckets[b.key].push({x:r.effort_hours, y:r.savings_monthly_usd, r:Math.max(5,Math.sqrt(r.savings_monthly_usd)/8), label:r.resource, tier:r.tier});
+  });
+  const datasets = Object.entries(buckets).filter(([,d])=>d.length).map(([k,d])=>({
+    label:{donow:"Do now",soon:"Do soon",back:"Backlog",deprio:"Deprioritize"}[k],
+    data:d,
+    backgroundColor:{donow:"#34d399cc",soon:"#fcd34dcc",back:"#cbd5e1cc",deprio:"#64748bcc"}[k]
+  }));
+  ch.roi = new Chart(document.getElementById("chartRoi"),{
+    type:"bubble", data:{datasets},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:"bottom",labels:{boxWidth:10}},
+        tooltip:{callbacks:{label:c=>c.raw.label+" · "+fmtMoney(c.raw.y)+"/mo · "+c.raw.x+"h · "+c.raw.tier}}},
+      scales:{
+        x:{title:{display:true,text:"Effort (engineering hours)"},beginAtZero:true},
+        y:{title:{display:true,text:"Monthly savings ($)"},ticks:{callback:v=>fmtMoney(v)},beginAtZero:true}
+      }}
+  });
+}
+
+function renderOwners(rows){
+  destroy("own");
+  const map = {};
+  rows.forEach(r => { map[r.owner] = (map[r.owner]||0) + r.savings_monthly_usd; });
+  const sorted = Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const labels = sorted.map(e=>e[0]);
+  const colors = labels.map(l => l==="(untagged)" ? "#ef4444" : "#22d3ee");
+  ch.own = new Chart(document.getElementById("chartOwners"),{
+    type:"bar",
+    data:{labels, datasets:[{data:sorted.map(e=>e[1]), backgroundColor:colors, borderRadius:6, maxBarThickness:22}]},
+    options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtMoney(c.parsed.x)+"/mo"}}},
+      scales:{x:{ticks:{callback:v=>fmtMoney(v)}}, y:{grid:{display:false}}}}
+  });
+}
+
+function renderTable(rows){
+  const body = document.querySelector("#findings tbody");
+  const sk = state.sortKey, dir = state.sortDir;
+  const sorted = [...rows].sort((a,b)=>{
+    const av = sk==="hourly" ? a.savings_monthly_usd/Math.max(0.5,a.effort_hours) : a[sk];
+    const bv = sk==="hourly" ? b.savings_monthly_usd/Math.max(0.5,b.effort_hours) : b[sk];
+    if(typeof av === "string"){ return av.localeCompare(bv) * dir; }
+    return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
+  });
+  body.innerHTML = sorted.map(f=>{
+    const b = bandOf(f);
+    const hourly = Math.round(f.savings_monthly_usd/Math.max(0.5,f.effort_hours));
+    const riskCls = f.risk==="Low"?"low":f.risk==="Medium"?"med":"high";
+    const ownerCell = f.owner==="(untagged)" ? `<span class="pill high">${f.owner}</span>` : f.owner;
+    return `<tr>
+      <td><span class="small">${f.category}</span></td>
+      <td>${f.resource}</td>
+      <td>${ownerCell}</td>
+      <td>${f.env}</td>
+      <td class="right num">${fmtMoney(f.savings_monthly_usd)}</td>
+      <td class="right num">${f.effort_hours}</td>
+      <td class="right num">$${hourly.toLocaleString()}</td>
+      <td><span class="pill ${b.key}">${b.label}</span></td>
+      <td><span class="pill ${riskCls}">${f.risk}</span></td>
+      <td><span class="pill ${f.tier.toLowerCase()}">${tierLabel[f.tier]}</span></td>
+      <td class="small">${f.business_value}</td>
+      <td><a class="btn ghost" href="/api/findings/${encodeURIComponent(f.id)}/script" download>Script</a></td>
+    </tr>`;
+  }).join("");
+  document.getElementById("findings-count").textContent =
+    `Showing ${rows.length} of ${state.findings.length} findings · total monthly savings ${fmtMoney(rows.reduce((a,f)=>a+f.savings_monthly_usd,0))}`;
+}
+
+function refresh(){
+  const rows = applyFilters();
+  renderKpis(rows);
+  renderCategoryChart(rows);
+  renderGauge();
+  renderRoi(rows);
+  renderOwners(rows);
+  renderTable(rows);
+}
+
+/* Tabs */
+document.getElementById("tabs").addEventListener("click", e=>{
+  const b = e.target.closest(".tab"); if(!b) return;
+  state.tab = b.dataset.tab;
+  document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("on", x===b));
+  ["dashboard","findings","about"].forEach(v=>{
+    document.getElementById("view-"+v).classList.toggle("hidden", v!==state.tab);
+  });
+  if(state.tab==="dashboard") setTimeout(refresh, 0);
+});
+
+/* Filter chips (delegated, since category chips are rebuilt) */
+document.getElementById("catChips").addEventListener("click", e=>{
+  const b = e.target.closest(".chip"); if(!b) return;
+  document.querySelectorAll("#catChips .chip").forEach(c=>c.classList.toggle("on", c===b));
+  state.cat = b.dataset.cat; refresh();
+});
+document.getElementById("tierChips").addEventListener("click", e=>{
+  const b = e.target.closest(".chip"); if(!b) return;
+  document.querySelectorAll("#tierChips .chip").forEach(c=>c.classList.toggle("on", c===b));
+  state.tier = b.dataset.tier; refresh();
+});
+document.getElementById("searchBox").addEventListener("input", e=>{ state.search = e.target.value; refresh(); });
+document.getElementById("subPicker").addEventListener("change", e=>{
+  state.subId = e.target.value;
+  // Subscription is set server-side via TARGET_SUBSCRIPTION_ID; if multi-sub support
+  // is needed in v1.1, pass ?sub= to /api/findings.
+  loadFindings();
+});
+document.getElementById("refreshBtn").addEventListener("click", async ()=>{
+  try { await fetch("/api/cache/invalidate", {method:"POST"}); } catch{}
+  loadFindings();
+});
+
+document.querySelectorAll("#findings thead th").forEach(th=>{
+  th.addEventListener("click", ()=>{
+    const k = th.dataset.sort; if(!k) return;
+    if(state.sortKey===k) state.sortDir = -state.sortDir;
+    else { state.sortKey = k; state.sortDir = -1; }
+    renderTable(applyFilters());
+  });
+});
+
+/* Boot */
+(async ()=>{
+  await Promise.all([loadIdentity(), loadSubscriptions()]);
+  await loadFindings();
+})();
+</script>
+</body>
+</html>
