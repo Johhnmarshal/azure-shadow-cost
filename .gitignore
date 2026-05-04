@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local env (commit .env.example only)
+.env
+.env.*
+!.env.example
+
+# Azure / IaC build artifacts
+*.bicep.json
+.azure/
+*.zip
+deployment-output.json
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
