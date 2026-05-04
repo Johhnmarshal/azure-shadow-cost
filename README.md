@@ -1,133 +1,141 @@
-# Shadow Cost — v1
+# Azure Shadow Cost
 
-Live-data Azure FinOps console. Detects shadow cost across four categories,
-generates safe (dry-run-default) `az` CLI remediation scripts per finding.
+> **The shadow-cost surface Azure Advisor doesn't price.** A FinOps web app
+> for an Advisor-green Azure tenant — surfaces the allocation gap,
+> commitment drift, data-plane waste, peak-aware rightsizing risk, and
+> per-owner remediation queues that a senior FinOps practitioner would find
+> by hand.
 
-## What's in here
+Azure Shadow Cost is a single web app (FastAPI + SPA, deployed to Azure
+App Service with a system-assigned Managed Identity) that pulls live data
+from Resource Graph, Cost Management, Reservations and Azure Monitor,
+detects waste across the categories Advisor under-prices, and emits
+**dry-run-default** `az` CLI remediation scripts that humans review and
+apply.
+
+## Why it exists
+
+If your tenant is "Advisor-green," the next 10–30% of recoverable spend
+is hiding in places Advisor doesn't surface as cost recommendations:
+
+- **Allocation gap** — resources missing required tags. You can't allocate
+  what you can't attribute.
+- **Commitment drift** — Reservations / Savings Plans you bought that are
+  now under-utilized because workloads moved.
+- **Data-plane waste** — storage on GZRS where LRS would do; Log Analytics
+  retention set to 730 days by default; Cosmos with multi-region writes in
+  non-prod.
+- **Peak-aware rightsizing risk** — Advisor's average-based downsize logic
+  is unsafe for spiky / batch / retail workloads. P95 and P99 catch the
+  peak that justifies the current SKU.
+- **PaaS sprawl** — empty App Service Plans, idle Log Analytics workspaces,
+  dormant API Management.
+
+## Repo layout
 
 ```
-v1/
-├── infra/              # Bicep — App Service + MI + role assignments
-│   ├── main.bicep
-│   ├── role-assignments.bicep
-│   └── deploy.sh       # one-shot deploy + zip-deploy helper
-├── backend/
-│   ├── app.py          # FastAPI entry; mounts SPA + /api/*
-│   ├── config.py       # env-driven settings
-│   ├── az_clients.py   # DefaultAzureCredential + SDK client factory
-│   ├── cache.py        # async TTL cache (Cost Mgmt is rate-limited)
-│   ├── detectors.py    # all detectors live here
-│   ├── pricing.py      # coarse $/month constants per SKU
-│   ├── script_builder.py   # composes bash remediation from templates
-│   ├── mock_data.py    # used when USE_MOCK_DATA=true
-│   ├── models.py       # Pydantic — Finding / FindingsResponse
-│   ├── kql/            # one .kql per detector
-│   └── templates/      # one .sh per detector + shared _header.sh
-├── frontend/
-│   └── index.html      # SPA (charts + findings table + script download)
-├── tests/test_smoke.py
-├── requirements.txt
-└── .env.example
+azure-shadow-cost/
+├── webapp/                 # FastAPI backend + SPA frontend (the running app)
+│   ├── backend/
+│   ├── frontend/
+│   ├── infra/              # Bicep — App Service + MI + role assignments
+│   ├── tests/
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── README.md           # local dev + deploy guide
+├── tools/                  # (PR2+) optional sibling CLI scripts
+├── workbooks/              # (PR5) Azure Workbook JSON outputs
+├── policies/               # (PR5) audit-mode Azure Policy starter pack
+├── automation/             # (PR5) GitHub Actions for nightly runs
+├── samples/                # synthetic example outputs
+├── INSPIRATIONS.md         # open-source patterns we've adapted
+├── .gitignore
+└── README.md               (this file)
 ```
 
-## Local dev (no Azure account needed)
+## Quick start (local, no Azure needed)
 
 ```bash
-cd v1
-python -m venv .venv && source .venv/bin/activate
+cd webapp
 pip install -r requirements.txt
-cp .env.example .env       # edit if you want; mock mode is on by default
 USE_MOCK_DATA=true uvicorn backend.app:app --reload --port 8000
 # open http://localhost:8000
 ```
 
-The SPA at `/` will hit `/api/findings` and render mock data identical in
-shape to live results.
+Mock mode serves a deterministic findings dataset shaped identically to
+live results, so the SPA renders without an Azure subscription.
 
-## Local dev against your real Azure subscription
+## Quick start (against your tenant)
 
 ```bash
 az login
 az account set --subscription <SUB_ID>
+
+cd webapp
 export TARGET_SUBSCRIPTION_ID=<SUB_ID>
-export USE_MOCK_DATA=false
+pip install -r requirements.txt
 uvicorn backend.app:app --reload --port 8000
 ```
 
-`DefaultAzureCredential` will pick up your `az login` automatically. Your
-identity must have `Reader` on the subscription (and `Cost Management Reader`
-for any spend joining; `Reservations Reader` at the billing scope for
-commitment drift).
+`DefaultAzureCredential` picks up your `az login`. Your identity needs
+`Reader` and `Cost Management Reader` at the subscription scope. See
+[`webapp/README.md`](webapp/README.md) for the full role matrix and
+deploy-to-App-Service runbook.
 
-## Deploy to Azure App Service
+## Roadmap (the five PRs)
 
-```bash
-cd v1/infra
-RG=rg-shadowcost LOCATION=eastus APP_NAME=shadowcost \
-  SUB_ID=$(az account show --query id -o tsv) \
-  ./deploy.sh
-```
+This repo is built in five tightly-scoped pull requests. PR1 lands the
+rebrand and the layout you're reading now. The next four ship the
+analyses that close the gap with a manual senior FinOps review.
 
-The script:
-
-1. Creates the resource group.
-2. Deploys `main.bicep` (App Service Plan B1 + App Service with system-assigned MI).
-3. Deploys `role-assignments.bicep` at subscription scope, granting the MI:
-   - `Reader`
-   - `Cost Management Reader`
-4. Zip-deploys `backend/`, `frontend/`, and `requirements.txt`.
-
-Open the returned `https://<site>.azurewebsites.net/` URL. First request
-takes ~60s while gunicorn warms up.
-
-### Optional roles (enable advanced features)
-
-| Role | Scope | Enables |
+| # | Title | Headline output |
 |---|---|---|
-| Reservations Reader | Billing account | `commitment_drift` detector returns real data |
-| Resource Policy Reader | Subscription | Future: surface tagging-policy compliance state |
+| **PR1** ✅ | Rename + lift root layout | `webapp/` + empty top-level dirs |
+| **PR2** | Currency auto-detect + Cost Management actuals join | Every finding priced from real billed amounts (with `cost_source: actual` vs. `estimate` flag) |
+| **PR3** | Peak-aware VM rightsizing detector + Advisor diff | "Advisor recommended this downsize but P95 says it's unsafe" — the metric that pays for the engine |
+| **PR4** | RI / Savings-Plan coverage with refund-buffer guardrail | Risk-scored shortlist that fits inside *your* cancellation-exposure buffer |
+| **PR5** | Context enricher + audit-mode Policy pack + Workbook JSON | Per-owner Markdown queues; downloadable Policy + Workbook starter packs |
 
-## Smoke tests
+PR-by-PR design notes are in each PR's commit message. The patterns we're
+adapting from the broader open-source FinOps community are credited in
+[`INSPIRATIONS.md`](INSPIRATIONS.md).
 
-```bash
-cd v1
-USE_MOCK_DATA=true python -m pytest -q tests
-```
+## Operating principles
 
-## API surface
+These are the constraints the engine is designed around. They're worth
+naming explicitly because they shape every PR:
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/health` | Liveness probe |
-| GET | `/api/me` | Resolved credential class + sub ID + mock flag |
-| GET | `/api/subscriptions` | List subscriptions visible to the credential |
-| GET | `/api/findings` | All detectors, returns `FindingsResponse` |
-| GET | `/api/findings/{id}/script` | Download bash remediation (dry-run default) |
-| POST | `/api/cache/invalidate` | Drop the in-memory cache |
+1. **Read-only against Azure.** Every detector issues `GET` and
+   `POST /query` calls. Nothing in this repo will delete, retag, or
+   modify a live resource. Remediation is always a human decision,
+   gated by the dry-run-default bash scripts the app emits.
+2. **Web-app first, CLI optional.** The interactive UI is the primary
+   surface. The `tools/` directory is a deliberate hook for future
+   stdlib-only CLI siblings, not the main path.
+3. **Live data, cached aggressively.** Cost Management is throttled
+   to ~5 req/min/sub; ARG has its own quotas. The in-memory TTL cache
+   defaults to 10 min. This is enough for a single-tenant app; multi-
+   instance deployments would need Redis.
+4. **Defaults are conservative.** Peak-rightsizing thresholds, the
+   refund-buffer requirement (no default — explicit only), and the
+   audit-then-deny Policy promotion pattern all err on the side of
+   *not* shipping a wrong recommendation.
 
-## Detectors
+## Status & limitations
 
-| Category | Detector | Source |
-|---|---|---|
-| Orphaned & idle | `unattached_disks` | ARG `Microsoft.Compute/disks` where `diskState == 'Unattached'` |
-| Orphaned & idle | `unused_public_ips` | ARG, Standard SKU, `ipConfiguration` is null |
-| Orphaned & idle | `empty_app_service_plans` | ARG, `numberOfSites == 0` |
-| Tagging | `tagging_gap` | ARG, computes set-difference vs. `REQUIRED_TAGS` |
-| Commitment | `commitment_drift` | Consumption API `reservations_summaries` |
-| Data plane | `storage_overprovisioned_redundancy` | ARG, non-prod tag + GRS/GZRS SKU |
-| Data plane | `long_retention_log_analytics` | ARG, retention > 90d |
-| Data plane | `overprovisioned_cosmos` | ARG, multi-write or multi-region in non-prod |
+- **Single subscription per deployment.** Multi-sub support is on the
+  PR5 follow-up backlog. `TARGET_SUBSCRIPTION_ID` is the current toggle.
+- **No persistence yet.** Every page load re-runs the detectors against
+  the cache. PR-after-5 adds a small SQLite store for trend / drift.
+- **Auth is at the App Service identity layer.** Web users are not
+  individually authenticated yet. Add Easy Auth before sharing the URL
+  beyond the FinOps team.
 
-Each detector returns one or more `Finding` objects following the
-ROI-engine contract; the SPA groups them onto KPI cards, gauge, doughnut,
-ROI quadrant, owner bar, and the findings table.
+## Contributing
 
-## Roadmap (v1.1)
+Issues and PRs welcome. The webapp deliberately avoids heavyweight Python
+dependencies; please justify any new requirement in `webapp/requirements.txt`.
 
-- Join detector findings with **actual** spend from Cost Management instead
-  of using `pricing.py` constants.
-- AAD Easy Auth on the App Service so the SPA can be shared with finance.
-- Multi-subscription scope (currently single-sub via `TARGET_SUBSCRIPTION_ID`).
-- Persist detector history to Cosmos / Storage so you can chart Visibility
-  Gap drift week-over-week.
-- Optional Teams webhook for "Do now" findings above a $ threshold.
+## License
+
+MIT.

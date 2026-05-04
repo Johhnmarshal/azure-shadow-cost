@@ -1,4 +1,4 @@
-"""FastAPI entry point for Shadow Cost v1.
+"""FastAPI entry point for Azure Shadow Cost.
 
 Endpoints
 ---------
@@ -28,9 +28,9 @@ from .models import Finding, FindingsResponse
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-log = logging.getLogger("shadowcost")
+log = logging.getLogger("azshc")
 
-app = FastAPI(title="Shadow Cost", version="1.0.0")
+app = FastAPI(title="Azure Shadow Cost", version="1.0.0")
 
 # CORS — leave permissive for local dev; tighten before sharing externally.
 app.add_middleware(

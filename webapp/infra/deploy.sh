@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ----------------------------------------------------------------------------
-# Shadow Cost v1 — one-shot deploy
+# Azure Shadow Cost v1 — one-shot deploy
 # Prereqs: az CLI, logged in (az login), correct subscription set.
 # Deploys:
 #   1. Resource group
@@ -11,9 +11,9 @@
 set -euo pipefail
 
 # ---- inputs (override via env) ----
-RG="${RG:-rg-shadowcost}"
+RG="${RG:-rg-azshc}"
 LOCATION="${LOCATION:-eastus}"
-APP_NAME="${APP_NAME:-shadowcost}"
+APP_NAME="${APP_NAME:-azshc}"
 SUB_ID="${SUB_ID:-$(az account show --query id -o tsv)}"
 REQUIRED_TAGS="${REQUIRED_TAGS:-Owner,CostCenter,Environment,Application}"
 

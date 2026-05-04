@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Shadow Cost — v1 infrastructure
+// Azure Shadow Cost — v1 infrastructure
 // Deploys: Linux App Service Plan + App Service (Python 3.11) with a
 // system-assigned managed identity. Role assignments at subscription scope
 // are applied in role-assignments.bicep (separate scope).
@@ -9,7 +9,7 @@ targetScope = 'resourceGroup'
 @description('Base name used for App Service + Plan. Lowercase, 3-24 chars.')
 @minLength(3)
 @maxLength(24)
-param appName string = 'shadowcost'
+param appName string = 'azshc'
 
 @description('Azure region for the App Service Plan + App.')
 param location string = resourceGroup().location
