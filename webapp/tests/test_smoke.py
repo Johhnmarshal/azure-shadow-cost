@@ -35,10 +35,24 @@ def test_findings_shape() -> None:
     assert "findings" in body
     assert "visibility_gap_pct" in body
     assert "total_savings_monthly_usd" in body
+    # PR2 — currency context surfaces on every response
+    assert "currency_code" in body and len(body["currency_code"]) == 3
+    assert "currency_glyph" in body and body["currency_glyph"]
     assert len(body["findings"]) > 0
     f0 = body["findings"][0]
-    for key in ("id", "detector", "category", "savings_monthly_usd", "tier", "risk"):
+    for key in ("id", "detector", "category", "savings_monthly_usd",
+                "cost_source", "tier", "risk"):
         assert key in f0, f"missing {key}"
+    assert f0["cost_source"] in ("actual", "estimate", "mixed")
+
+
+def test_billing_endpoint() -> None:
+    r = client.get("/api/billing")
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("currency_code") == "USD"  # mock-mode returns the stable USD context
+    assert body.get("glyph") == "$"
+    assert body.get("source") in ("detected", "override", "fallback")
 
 
 def test_script_download() -> None:

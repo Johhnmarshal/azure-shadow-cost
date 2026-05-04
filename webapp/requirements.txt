@@ -9,6 +9,7 @@ azure-mgmt-resourcegraph==8.0.0
 azure-mgmt-costmanagement==4.0.1
 azure-mgmt-consumption==10.0.0
 azure-mgmt-monitor==6.0.2
+azure-mgmt-costmanagement>=3.0.0
 
 # azure-mgmt-resourcegraph 8.0.0 imports `six` internally but doesn't pin it
 # as a hard dep on Python 3.13. Pin explicitly so fresh installs don't break.

@@ -1,15 +1,26 @@
 """Detector implementations.
 
 Each detector is an async function that returns a list of :class:`Finding`.
-They share helpers for running KQL via Azure Resource Graph and for
-estimating monthly cost from the inventory shape.
+They share helpers for running KQL via Azure Resource Graph and for joining
+the resulting inventory to actual billed amounts via Cost Management.
 
-These are intentionally conservative on cost estimates — better to under-
-promise and over-deliver. If you have actual unit-cost telemetry from your
-EA, replace the constants in :mod:`pricing`.
+Pricing flow (PR2 onward):
+
+1. Each detector builds an ``items`` list of ``(resource_id, fallback_estimate)``
+   tuples. The fallback comes from :mod:`pricing` constants.
+2. ``cost_actuals.price_resources`` is awaited once per detector. It looks up
+   actuals from a single subscription-scoped Cost Management ``/query`` (cached
+   ~10 min) and per-resource decides actual-vs-fallback.
+3. The detector returns a Finding with ``cost_source`` set to ``actual``,
+   ``mixed``, or ``estimate``.
+
+Resources without billing rows (never-attached ASR replicas, freshly-created
+resources) gracefully fall back to estimates without making the finding
+disappear.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -18,11 +29,11 @@ from typing import Any, Iterable
 
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 
-from . import pricing
+from . import cost_actuals, pricing
 from .az_clients import resource_graph
 from .cache import cache
 from .config import settings
-from .models import Finding
+from .models import CostSource, Finding
 
 
 log = logging.getLogger("detectors")
@@ -46,8 +57,6 @@ async def _run_arg(query: str, page_size: int = 1000) -> list[dict[str, Any]]:
     Resource Graph is synchronous in the SDK; we run it in a thread to keep
     FastAPI's event loop free.
     """
-    import asyncio
-
     sub = settings().target_subscription_id
     if not sub:
         raise RuntimeError("TARGET_SUBSCRIPTION_ID is not set.")
@@ -105,7 +114,11 @@ async def detect_unattached_disks() -> list[Finding]:
     )
     if not rows:
         return []
-    monthly = sum(pricing.disk_monthly_usd(r.get("sku", "Premium_LRS"), int(r.get("sizeGB", 0))) for r in rows)
+    items = [
+        (r["id"], pricing.disk_monthly_usd(r.get("sku", "Premium_LRS"), int(r.get("sizeGB", 0))))
+        for r in rows
+    ]
+    monthly, source = await cost_actuals.price_resources(items)
     sample = ", ".join(r["name"] for r in rows[:3])
     return [Finding(
         id=_make_id("unattached_disks", *(r["id"] for r in rows[:25])),
@@ -115,11 +128,12 @@ async def detect_unattached_disks() -> list[Finding]:
         resource_ids=[r["id"] for r in rows],
         owner="(untagged)" if all(r.get("owner") == "(untagged)" for r in rows) else "mixed",
         env=_env_bucket(rows[0].get("env", "")),
-        savings_monthly_usd=round(monthly, 2),
+        savings_monthly_usd=monthly,
+        cost_source=source,
         effort_hours=max(1, len(rows) // 50),
         risk="Low",
         tier="Crawl",
-        business_value=f"Frees ~${monthly*12:,.0f}/yr. Pair with deny-mode Azure Policy on unattached disk creation.",
+        business_value=f"Frees ~{monthly*12:,.0f}/yr (in tenant currency). Pair with deny-mode Azure Policy on unattached disk creation.",
     )]
 
 
@@ -131,7 +145,8 @@ async def detect_unused_public_ips() -> list[Finding]:
     chargeable = [r for r in rows if r.get("sku") == "Standard"]
     if not chargeable:
         return []
-    monthly = pricing.PUBLIC_IP_STANDARD_MONTHLY_USD * len(chargeable)
+    items = [(r["id"], pricing.PUBLIC_IP_STANDARD_MONTHLY_USD) for r in chargeable]
+    monthly, source = await cost_actuals.price_resources(items)
     return [Finding(
         id=_make_id("unused_public_ips", *(r["id"] for r in chargeable[:25])),
         detector="unused_public_ips",
@@ -140,7 +155,8 @@ async def detect_unused_public_ips() -> list[Finding]:
         resource_ids=[r["id"] for r in chargeable],
         owner="mixed" if any(r.get("owner") != "(untagged)" for r in chargeable) else "(untagged)",
         env="unknown",
-        savings_monthly_usd=round(monthly, 2),
+        savings_monthly_usd=monthly,
+        cost_source=source,
         effort_hours=max(1, len(chargeable) // 100),
         risk="Low",
         tier="Crawl",
@@ -155,7 +171,8 @@ async def detect_empty_app_service_plans() -> list[Finding]:
     )
     if not rows:
         return []
-    monthly = sum(pricing.app_service_plan_monthly_usd(r.get("skuName", "B1")) for r in rows)
+    items = [(r["id"], pricing.app_service_plan_monthly_usd(r.get("skuName", "B1"))) for r in rows]
+    monthly, source = await cost_actuals.price_resources(items)
     return [Finding(
         id=_make_id("empty_asp", *(r["id"] for r in rows[:25])),
         detector="empty_app_service_plans",
@@ -164,7 +181,8 @@ async def detect_empty_app_service_plans() -> list[Finding]:
         resource_ids=[r["id"] for r in rows],
         owner="mixed",
         env="unknown",
-        savings_monthly_usd=round(monthly, 2),
+        savings_monthly_usd=monthly,
+        cost_source=source,
         effort_hours=max(1, len(rows) // 20),
         risk="Low",
         tier="Crawl",
@@ -187,20 +205,23 @@ async def detect_tagging_gap() -> list[Finding]:
     for r in rows:
         by_type.setdefault(r["type"], []).append(r)
     findings: list[Finding] = []
-    for rtype, items in sorted(by_type.items(), key=lambda x: -len(x[1]))[:10]:
-        # Cost estimate: assume ~$25/mo opportunity per untagged resource —
-        # this is a coarse "unattributed spend" proxy until joined with CM.
-        est = 25.0 * len(items)
+    for rtype, group in sorted(by_type.items(), key=lambda x: -len(x[1]))[:10]:
+        # Per-resource fallback: 25 currency units. Cost Management actuals
+        # take precedence per-ID where available — so for spendy untagged
+        # resources (a £400/mo storage account, say) the bill is real.
+        items = [(r["id"], 25.0) for r in group]
+        monthly, source = await cost_actuals.price_resources(items)
         findings.append(Finding(
             id=_make_id("tagging_gap", rtype),
             detector="tagging_gap",
             category="Tagging",
-            resource=f"{len(items)} {rtype} resources missing required tags",
-            resource_ids=[r["id"] for r in items],
+            resource=f"{len(group)} {rtype} resources missing required tags",
+            resource_ids=[r["id"] for r in group],
             owner="(untagged)",
             env="unknown",
-            savings_monthly_usd=round(est, 2),
-            effort_hours=max(2, len(items) // 30),
+            savings_monthly_usd=monthly,
+            cost_source=source,
+            effort_hours=max(2, len(group) // 30),
             risk="Low",
             tier="Crawl",
             business_value=(
@@ -218,19 +239,20 @@ async def detect_tagging_gap() -> list[Finding]:
 async def detect_commitment_drift() -> list[Finding]:
     """Surface RIs / SPs whose 30-day utilization is below the break-even.
 
-    Uses the Consumption API's `reservation_recommendation_details` and
-    `reservations_summaries` endpoints. Requires Reservations Reader at
-    the billing scope; if the call 403s, return a single advisory finding
-    instead of crashing.
+    Uses the Consumption API's ``reservations_summaries`` endpoint. Requires
+    Reservations Reader at the billing scope; if the call 403s, return a
+    single advisory finding instead of crashing.
+
+    PR4 will replace this with a proper buffer-bounded RI/SP shortlist.
+    Until then we keep ``cost_source='estimate'`` because reservation IDs
+    don't join cleanly to Cost Management's resource-ID-keyed billing rows.
     """
     from .az_clients import consumption
-    import asyncio
 
     async def _fetch() -> list[dict[str, Any]]:
         def _do() -> list[dict[str, Any]]:
             try:
                 client = consumption()
-                # 'monthly' grain, last 30 days
                 summaries = client.reservations_summaries.list_by_reservation_order(
                     reservation_order_id="-",
                     grain="monthly",
@@ -264,6 +286,7 @@ async def detect_commitment_drift() -> list[Finding]:
             owner="finops",
             env="prod",
             savings_monthly_usd=0,
+            cost_source="estimate",
             effort_hours=1,
             risk="Low",
             tier="Walk",
@@ -275,8 +298,6 @@ async def detect_commitment_drift() -> list[Finding]:
     underused = [r for r in rows if r["avgUtilizationPercentage"] < 70]
     if not underused:
         return []
-    # Conservative: 25% of the unused hours converts to recoverable spend if
-    # exchanged or sized down. ~$0.10/hour blended per RI as an opener.
     recoverable = sum((r["reservedHours"] - r["usedHours"]) * 0.10 * 0.25 for r in underused)
     return [Finding(
         id=_make_id("commitment_drift", *(r["reservationId"] for r in underused[:25])),
@@ -287,6 +308,7 @@ async def detect_commitment_drift() -> list[Finding]:
         owner="finops",
         env="prod",
         savings_monthly_usd=round(recoverable, 2),
+        cost_source="estimate",
         effort_hours=8,
         risk="Medium",
         tier="Walk",
@@ -307,9 +329,14 @@ async def detect_overprovisioned_storage() -> list[Finding]:
     )
     if not rows:
         return []
-    # Crude estimate: 50% saving relative to a baseline $20/mo per account.
-    # Replace with actual CM-derived per-account spend in v1.1.
-    monthly = 10 * len(rows)
+    # Fallback: ~10/mo per account (the *delta* between GZRS and LRS, not the
+    # whole bill). Actuals via Cost Management overstate this if used as-is —
+    # so we still treat actuals as a per-account upper bound and downgrade to
+    # 50% as the recoverable share.
+    items = [(r["id"], 10.0) for r in rows]
+    raw_monthly, source = await cost_actuals.price_resources(items)
+    # Recoverable = ~50% of the actual bill when downgrading GZRS→LRS.
+    monthly = round(raw_monthly * 0.5, 2) if source == "actual" else raw_monthly
     return [Finding(
         id=_make_id("storage_overprov", *(r["id"] for r in rows[:25])),
         detector="storage_overprovisioned_redundancy",
@@ -318,7 +345,8 @@ async def detect_overprovisioned_storage() -> list[Finding]:
         resource_ids=[r["id"] for r in rows],
         owner="mixed",
         env="nonprod",
-        savings_monthly_usd=round(monthly, 2),
+        savings_monthly_usd=monthly,
+        cost_source=source,
         effort_hours=max(2, len(rows) // 5),
         risk="Medium",
         tier="Walk",
@@ -333,9 +361,12 @@ async def detect_long_retention_log_analytics() -> list[Finding]:
     )
     if not rows:
         return []
-    # Move retention beyond 90d to Archive tier (~$0.02/GB-mo vs Analytics $2.30/GB-mo).
-    # Without ingestion volumes, estimate $80/mo per workspace.
-    monthly = 80 * len(rows)
+    # Fallback: 80/mo per workspace. Actuals via Cost Management capture the
+    # workspace's ingestion + retention bill; we treat ~30% as recoverable
+    # (move >90d to Archive tier ~$0.02/GB-mo vs Analytics $2.30/GB-mo).
+    items = [(r["id"], 80.0) for r in rows]
+    raw_monthly, source = await cost_actuals.price_resources(items)
+    monthly = round(raw_monthly * 0.30, 2) if source == "actual" else raw_monthly
     return [Finding(
         id=_make_id("la_retention", *(r["id"] for r in rows[:25])),
         detector="long_retention_log_analytics",
@@ -344,7 +375,8 @@ async def detect_long_retention_log_analytics() -> list[Finding]:
         resource_ids=[r["id"] for r in rows],
         owner="mixed",
         env="unknown",
-        savings_monthly_usd=round(monthly, 2),
+        savings_monthly_usd=monthly,
+        cost_source=source,
         effort_hours=max(2, len(rows)),
         risk="Medium",
         tier="Walk",
@@ -359,7 +391,11 @@ async def detect_overprovisioned_cosmos() -> list[Finding]:
     )
     if not rows:
         return []
-    monthly = 250 * len(rows)
+    # Fallback: 250/mo per account. Actuals capture the full Cosmos bill; we
+    # treat ~50% as recoverable when collapsing multi-region to single-region.
+    items = [(r["id"], 250.0) for r in rows]
+    raw_monthly, source = await cost_actuals.price_resources(items)
+    monthly = round(raw_monthly * 0.5, 2) if source == "actual" else raw_monthly
     return [Finding(
         id=_make_id("cosmos_overprov", *(r["id"] for r in rows[:25])),
         detector="overprovisioned_cosmos",
@@ -368,7 +404,8 @@ async def detect_overprovisioned_cosmos() -> list[Finding]:
         resource_ids=[r["id"] for r in rows],
         owner="mixed",
         env="nonprod",
-        savings_monthly_usd=round(monthly, 2),
+        savings_monthly_usd=monthly,
+        cost_source=source,
         effort_hours=max(4, len(rows) * 2),
         risk="Medium",
         tier="Walk",
@@ -397,8 +434,6 @@ ALL_DETECTORS = (
 
 
 async def run_all() -> list[Finding]:
-    import asyncio
-
     results = await asyncio.gather(*(d() for d in ALL_DETECTORS), return_exceptions=True)
     out: list[Finding] = []
     for d, r in zip(ALL_DETECTORS, results):

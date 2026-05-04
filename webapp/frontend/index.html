@@ -80,6 +80,10 @@
   .pill.soon{background:rgba(245,158,11,.2);color:#fcd34d}
   .pill.back{background:rgba(148,163,184,.2);color:#cbd5e1}
   .pill.deprio{background:rgba(100,116,139,.25);color:#94a3b8}
+  /* cost source pills */
+  .pill.actual{background:rgba(52,211,153,.18);color:#86efac}
+  .pill.mixed{background:rgba(245,158,11,.16);color:#fcd34d}
+  .pill.estimate{background:rgba(148,163,184,.18);color:#cbd5e1}
   .small{color:var(--ink-dim);font-size:12px}
   .right{text-align:right}
   .num{font-variant-numeric:tabular-nums;font-weight:600}
@@ -117,7 +121,7 @@
       <div class="logo">S</div>
       <div>
         <h1>Azure Shadow Cost</h1>
-        <p>Azure FinOps console — beyond Advisor. Detect, explain, generate safe remediation.</p>
+        <p>Azure FinOps console — beyond Advisor. Detect, explain, generate safe remediation. <span id="brand-ccy" class="small" style="margin-left:6px"></span></p>
       </div>
     </div>
     <div class="spacer"></div>
@@ -239,10 +243,11 @@
             <th data-sort="resource">Finding</th>
             <th data-sort="owner">Owner</th>
             <th data-sort="env">Env</th>
-            <th data-sort="savings_monthly_usd" class="right">$/mo</th>
+            <th data-sort="savings_monthly_usd" class="right" id="th-savings">/mo</th>
             <th data-sort="effort_hours" class="right">Effort</th>
-            <th data-sort="hourly" class="right">$/hr</th>
+            <th data-sort="hourly" class="right">/hr</th>
             <th>Priority</th>
+            <th data-sort="cost_source">Source</th>
             <th>Risk</th>
             <th>Tier</th>
             <th>Business value</th>
@@ -289,9 +294,9 @@
 </div>
 
 <script>
-const fmtMoney = n => n>=1e6 ? "$"+(n/1e6).toFixed(2)+"M" : n>=1e3 ? "$"+(n/1e3).toFixed(1)+"k" : "$"+n.toFixed(0);
 const fmtInt = n => n.toLocaleString();
 const tierLabel = {Crawl:"Quick Win", Walk:"Structural", Run:"Architectural"};
+const sourceLabel = {actual:"actual", mixed:"mixed", estimate:"estimate"};
 const categoryColors = {
   "Orphaned storage":"#22d3ee","Idle compute":"#a78bfa","Idle network":"#60a5fa",
   "Orphaned network":"#f472b6","Rightsizing":"#34d399","Commitment":"#f59e0b",
@@ -299,8 +304,35 @@ const categoryColors = {
   "Tagging":"#fda4af","Data plane":"#22d3ee"
 };
 
-const state = { subId:null, cat:"all", tier:"all", search:"", findings:[], gap:0, tab:"dashboard", sortKey:"savings_monthly_usd", sortDir:-1 };
+const state = {
+  subId:null, cat:"all", tier:"all", search:"",
+  findings:[], gap:0,
+  currencyCode:"USD", currencyGlyph:"$",
+  tab:"dashboard", sortKey:"savings_monthly_usd", sortDir:-1,
+};
 const ch = {};
+
+/* Currency-aware money formatter — uses state.currencyCode (set from /api/findings).
+ * Compact notation handles k/M abbreviation; we manually attach the glyph for
+ * locales whose ISO code Intl renders verbosely (e.g. "ZAR 1.2K"). */
+function fmtMoney(n){
+  if(n == null || isNaN(n)) return "—";
+  const code = state.currencyCode || "USD";
+  try {
+    return new Intl.NumberFormat("en", {
+      style:"currency", currency:code,
+      notation:"compact", maximumFractionDigits:1,
+    }).format(n);
+  } catch {
+    return (state.currencyGlyph || "$") + (n>=1e6 ? (n/1e6).toFixed(1)+"M" : n>=1e3 ? (n/1e3).toFixed(1)+"k" : n.toFixed(0));
+  }
+}
+function fmtMoneyExact(n){
+  const code = state.currencyCode || "USD";
+  try {
+    return new Intl.NumberFormat("en", { style:"currency", currency:code, maximumFractionDigits:0 }).format(n);
+  } catch { return (state.currencyGlyph||"$") + n.toFixed(0); }
+}
 
 Chart.defaults.color = "#93a2bd";
 Chart.defaults.borderColor = "rgba(147,162,189,.15)";
@@ -368,6 +400,9 @@ async function loadFindings(){
     state.findings = data.findings || [];
     state.gap = data.visibility_gap_pct || 0;
     state.cachedAt = data.cached_at;
+    state.currencyCode = data.currency_code || "USD";
+    state.currencyGlyph = data.currency_glyph || "$";
+    document.getElementById("brand-ccy").textContent = `· currency: ${state.currencyCode}`;
     rebuildCategoryChips();
     setBanner("");
     refresh();
@@ -449,7 +484,7 @@ function renderRoi(rows){
         tooltip:{callbacks:{label:c=>c.raw.label+" · "+fmtMoney(c.raw.y)+"/mo · "+c.raw.x+"h · "+c.raw.tier}}},
       scales:{
         x:{title:{display:true,text:"Effort (engineering hours)"},beginAtZero:true},
-        y:{title:{display:true,text:"Monthly savings ($)"},ticks:{callback:v=>fmtMoney(v)},beginAtZero:true}
+        y:{title:{display:true,text:"Monthly savings"},ticks:{callback:v=>fmtMoney(v)},beginAtZero:true}
       }}
   });
 }
@@ -484,6 +519,10 @@ function renderTable(rows){
     const hourly = Math.round(f.savings_monthly_usd/Math.max(0.5,f.effort_hours));
     const riskCls = f.risk==="Low"?"low":f.risk==="Medium"?"med":"high";
     const ownerCell = f.owner==="(untagged)" ? `<span class="pill high">${f.owner}</span>` : f.owner;
+    const src = f.cost_source || "estimate";
+    const srcTitle = src==="actual" ? "Priced from Cost Management billing rows."
+                  : src==="mixed"  ? "Some resources priced from Cost Management; rest from list-price fallback."
+                  :                  "All resources priced from list-price fallback (no billing rows yet).";
     return `<tr>
       <td><span class="small">${f.category}</span></td>
       <td>${f.resource}</td>
@@ -491,8 +530,9 @@ function renderTable(rows){
       <td>${f.env}</td>
       <td class="right num">${fmtMoney(f.savings_monthly_usd)}</td>
       <td class="right num">${f.effort_hours}</td>
-      <td class="right num">$${hourly.toLocaleString()}</td>
+      <td class="right num">${fmtMoneyExact(hourly)}</td>
       <td><span class="pill ${b.key}">${b.label}</span></td>
+      <td><span class="pill ${src}" title="${srcTitle}">${sourceLabel[src]}</span></td>
       <td><span class="pill ${riskCls}">${f.risk}</span></td>
       <td><span class="pill ${f.tier.toLowerCase()}">${tierLabel[f.tier]}</span></td>
       <td class="small">${f.business_value}</td>

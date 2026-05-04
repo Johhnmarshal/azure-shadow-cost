@@ -28,9 +28,10 @@ class Settings:
             "REQUIRED_TAGS", "Owner,CostCenter,Environment,Application"
         )
     )
-    # Reporting currency. Cost Management returns billing currency by default.
+    # Reporting currency. Set to "auto" (default) to detect from a Cost Management
+    # probe at startup. Set to a 3-letter ISO code to force a specific glyph.
     reporting_currency: str = field(
-        default_factory=lambda: os.environ.get("REPORTING_CURRENCY", "USD")
+        default_factory=lambda: os.environ.get("REPORTING_CURRENCY", "auto")
     )
     # Cache TTL for ARG/Cost Management responses (seconds). Cost Management is
     # heavily rate-limited (~5 req/min/sub), so default to 10 minutes.

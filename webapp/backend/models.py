@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 Tier = Literal["Crawl", "Walk", "Run"]
 Risk = Literal["Low", "Medium", "High"]
+CostSource = Literal["actual", "estimate", "mixed"]
 Category = Literal[
     "Orphaned storage",
     "Idle compute",
@@ -32,7 +33,22 @@ class Finding(BaseModel):
     resource_ids: list[str] = Field(default_factory=list, description="Azure resource IDs the script will operate on.")
     owner: str = Field(default="(untagged)", description="Owner tag value, or '(untagged)'.")
     env: str = Field(default="unknown", description="prod / nonprod / unknown.")
-    savings_monthly_usd: float = Field(..., ge=0, description="Estimated $/month saved if remediated.")
+    savings_monthly_usd: float = Field(
+        ..., ge=0,
+        description=(
+            "Estimated savings/month if remediated. The numeric value is in "
+            "the tenant's billing currency (auto-detected via /api/billing) — "
+            "the historical `_usd` suffix is retained for API back-compat."
+        ),
+    )
+    cost_source: CostSource = Field(
+        default="estimate",
+        description=(
+            "Where the savings figure came from: 'actual' (Cost Management "
+            "billing rows), 'estimate' (pricing.py constants), or 'mixed' "
+            "(some resources had bills, some didn't)."
+        ),
+    )
     effort_hours: float = Field(..., gt=0, description="Eng hours to remediate.")
     risk: Risk
     tier: Tier
@@ -46,4 +62,6 @@ class FindingsResponse(BaseModel):
     findings: list[Finding]
     visibility_gap_pct: float = Field(..., description="% of analyzed spend missing a required tag.")
     total_savings_monthly_usd: float
+    currency_code: str = Field(default="USD", description="ISO currency code in which all monetary fields are denominated.")
+    currency_glyph: str = Field(default="$", description="Display glyph for currency_code.")
     cached_at: str = Field(..., description="ISO timestamp when this response was computed.")

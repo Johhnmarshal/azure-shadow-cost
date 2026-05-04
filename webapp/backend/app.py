@@ -4,6 +4,7 @@ Endpoints
 ---------
 GET  /api/health                      Liveness probe.
 GET  /api/me                          Returns the resolved identity (MI / SP / az login).
+GET  /api/billing                     Detected tenant currency (PR2).
 GET  /api/subscriptions               Lists subscriptions visible to the credential.
 GET  /api/findings                    Runs all detectors, returns FindingsResponse.
 GET  /api/findings/{id}/script        Returns the generated bash remediation as text/plain.
@@ -13,6 +14,7 @@ Static SPA is mounted at "/" from ../frontend.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -20,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import detectors, mock_data, script_builder
+from . import billing, detectors, mock_data, script_builder
 from .az_clients import credential, subscriptions
 from .cache import cache
 from .config import settings
@@ -62,6 +64,23 @@ async def me() -> dict[str, str]:
 
 
 # ----------------------------------------------------------------------------
+# Billing context (PR2)
+# ----------------------------------------------------------------------------
+
+async def _billing_context() -> billing.BillingContext:
+    """Resolve currency. In mock mode return a stable USD context."""
+    if settings().use_mock_data:
+        return billing.BillingContext("USD", "$", "fallback")
+    return await billing.context()
+
+
+@app.get("/api/billing")
+async def get_billing() -> dict[str, str]:
+    ctx = await _billing_context()
+    return ctx.to_dict()
+
+
+# ----------------------------------------------------------------------------
 # Subscriptions
 # ----------------------------------------------------------------------------
 
@@ -69,7 +88,6 @@ async def me() -> dict[str, str]:
 async def list_subscriptions() -> list[dict[str, str]]:
     if settings().use_mock_data:
         return [{"subscriptionId": "00000000-0000-0000-0000-000000000000", "displayName": "Mock Subscription"}]
-    import asyncio
 
     def _do() -> list[dict[str, str]]:
         return [
@@ -92,11 +110,13 @@ async def _findings() -> list[Finding]:
 
 @app.get("/api/findings", response_model=FindingsResponse)
 async def get_findings() -> FindingsResponse:
-    items = await _findings()
+    items, ctx = await asyncio.gather(_findings(), _billing_context())
     return FindingsResponse(
         findings=items,
         visibility_gap_pct=detectors.visibility_gap_pct(items),
         total_savings_monthly_usd=round(sum(f.savings_monthly_usd for f in items), 2),
+        currency_code=ctx.currency_code,
+        currency_glyph=ctx.glyph,
         cached_at=detectors.stamp(),
     )
 
