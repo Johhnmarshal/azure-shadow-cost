@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 Tier = Literal["Crawl", "Walk", "Run"]
 Risk = Literal["Low", "Medium", "High"]
 CostSource = Literal["actual", "estimate", "mixed"]
+Confidence = Literal["HIGH", "MEDIUM", "LOW"]
 Category = Literal[
     "Orphaned storage",
     "Idle compute",
@@ -52,6 +53,14 @@ class Finding(BaseModel):
     effort_hours: float = Field(..., gt=0, description="Eng hours to remediate.")
     risk: Risk
     tier: Tier
+    confidence: Confidence | None = Field(
+        default=None,
+        description="Detector confidence (HIGH/MEDIUM/LOW). Currently set by peak rightsizing only.",
+    )
+    proposed_size: str | None = Field(
+        default=None,
+        description="Target SKU when the detector proposes a specific size (peak rightsizing).",
+    )
     business_value: str = Field(..., description="Business framing for leadership.")
 
     def hourly_return(self) -> float:

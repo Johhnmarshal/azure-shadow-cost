@@ -1,0 +1,8 @@
+name,resourceGroup,location,size,env,cpu_p95,cpu_p99,mem_p95_used,mem_p99_used,coverage,verdict,confidence,advisor_advised,advisor_unsafe,proposed_size
+vm-batch-night-04,rg-batch,uksouth,Standard_E16ds_v5,prod,18.4,92.7,22.0,88.0,0.96,KEEP,MEDIUM,true,true,
+vm-retail-checkout-01,rg-retail,uksouth,Standard_D8s_v5,prod,14.2,95.1,30.5,41.0,0.99,KEEP,MEDIUM,true,true,
+vm-api-core-01,rg-api,uksouth,Standard_D8s_v5,prod,28.0,41.0,38.0,52.0,0.98,DOWNSIZE_CANDIDATE,HIGH,false,false,Standard_D4s_v5
+vm-api-core-02,rg-api,uksouth,Standard_D8s_v5,prod,30.5,44.2,35.0,49.0,0.97,DOWNSIZE_CANDIDATE,HIGH,true,false,Standard_D4s_v5
+vm-stage-runner-03,rg-staging,ukwest,Standard_D4s_v5,nonprod,12.0,20.0,25.0,33.0,0.91,DOWNSIZE_CANDIDATE,HIGH,false,false,Standard_D2s_v5
+vm-billing-svc-01,rg-billing,uksouth,Standard_D4s_v5,prod,86.0,97.0,70.0,82.0,0.99,UPSIZE_WARNING,HIGH,false,false,
+vm-ml-research-02,rg-ml,uksouth,Standard_E8s_v5,nonprod,4.0,6.0,8.0,11.0,0.45,INSUFFICIENT_DATA,LOW,false,false,

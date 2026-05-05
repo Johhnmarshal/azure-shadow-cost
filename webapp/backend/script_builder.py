@@ -24,6 +24,8 @@ _TEMPLATES = {
     "overprovisioned_cosmos":        "disable_cosmos_multi_region.sh",
     "commitment_drift":              "review_commitment_drift.sh",
     "commitment_advisory":           "review_commitment_drift.sh",
+    "peak_downsize":                 "downsize_vms.sh",
+    # Upsize / advisor-unsafe findings are advisory only — no remediation script.
 }
 
 

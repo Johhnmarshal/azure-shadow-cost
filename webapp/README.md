@@ -128,14 +128,62 @@ naming explicitly because they shape every PR:
 - **No persistence yet.** Every page load re-runs the detectors against
   the cache. PR-after-5 adds a small SQLite store for trend / drift.
 - **Auth is at the App Service identity layer.** Web users are not
-  individually authenticated yet. Add Easy Auth before sharing the URL
-  beyond the FinOps team.
+  individually authenticated yet. Add Easy Auth before sharing externally.
 
-## Contributing
+## API surface
 
-Issues and PRs welcome. The webapp deliberately avoids heavyweight Python
-dependencies; please justify any new requirement in `webapp/requirements.txt`.
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | Liveness probe |
+| GET | `/api/me` | Resolved credential class + sub ID + mock flag |
+| GET | `/api/billing` | Detected tenant currency code + glyph (PR2) |
+| GET | `/api/subscriptions` | Subscriptions visible to the credential |
+| GET | `/api/findings` | All detectors; `FindingsResponse` (incl. `currency_code` + per-finding `cost_source`) |
+| GET | `/api/findings/{id}/script` | Bash remediation (dry-run default) |
+| GET | `/api/peak-rightsizing` | Per-VM peak detail + summary (PR3) |
+| GET | `/api/settings` | Current peak-rightsizing thresholds (PR3) |
+| POST | `/api/settings` | Atomic threshold update (PR3) |
+| POST | `/api/cache/invalidate` | Drop the in-memory cache |
 
-## License
+PRs 4-5 add `/api/ri-coverage`, `/api/queues/{owner}.md`,
+`/api/policies/{category}.json`, and `/api/workbooks/{name}.json`.
 
-MIT.
+## Peak rightsizing (PR3)
+
+Detectors `peak_advisor_unsafe`, `peak_downsize`, `peak_upsize` pull P95/P99
+of `Percentage CPU` and `Available Memory Bytes` from Azure Monitor over
+the last 30 days, apply a deterministic decision tree, and diff against
+Azure Advisor's "Cost — Resize VM" recommendations. The headline metric is
+*Advisor recs that would have been unsafe at P95* — see
+[`samples/peak-rightsizing/peak-rightsizing-combined.md`](samples/peak-rightsizing/peak-rightsizing-combined.md)
+for the report shape.
+
+Excluded by design: `databricks-rg-*`, `MC_*`/`mc_*` resource groups,
+VMs whose name starts with `aks-`. These are managed by their parent
+service.
+
+Thresholds default to the **Conservative** profile (40 / 50 / 80) and are
+overridable per-run via the SPA's gear icon (saves to in-memory state) or
+via `AZSHC_T_*` env vars on the App Service. See `webapp/.env.example`.
+
+The downsize ladder + SKU memory map live in `webapp/backend/sku_memory.py`
+— extend that module when your tenant uses VM families we don't list yet.
+
+## Local dev (no Azure account)
+
+```bash
+cd webapp
+pip install -r requirements.txt
+USE_MOCK_DATA=true uvicorn backend.app:app --reload --port 8000
+# open http://localhost:8000
+```
+
+Mock mode serves a deterministic dataset shaped identically to live results,
+so the SPA renders without an Azure subscription.
+
+## Tests
+
+```bash
+cd webapp
+USE_MOCK_DATA=true python -m pytest -q tests
+```
