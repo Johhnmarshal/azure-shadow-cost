@@ -8,6 +8,9 @@ GET  /api/billing                     Detected tenant currency (PR2).
 GET  /api/subscriptions               Lists subscriptions visible to the credential.
 GET  /api/findings                    Runs all detectors, returns FindingsResponse.
 GET  /api/findings/{id}/script        Returns the generated bash remediation as text/plain.
+GET  /api/peak-rightsizing            Per-VM peak rightsizing detail + summary (PR3).
+GET  /api/settings                    Current peak-rightsizing thresholds (PR3).
+POST /api/settings                    Atomic update of one or more thresholds (PR3).
 POST /api/cache/invalidate            Drops the in-memory cache (auth-gate this in v1.1).
 
 Static SPA is mounted at "/" from ../frontend.
@@ -21,8 +24,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from . import billing, detectors, mock_data, script_builder
+from . import billing, detectors, mock_data, peak_rightsizing, script_builder, thresholds
 from .az_clients import credential, subscriptions
 from .cache import cache
 from .config import settings
@@ -104,8 +108,9 @@ async def list_subscriptions() -> list[dict[str, str]]:
 
 async def _findings() -> list[Finding]:
     if settings().use_mock_data:
-        return list(mock_data.MOCK_FINDINGS)
-    return await detectors.run_all()
+        return list(mock_data.MOCK_FINDINGS) + list(mock_data.MOCK_PEAK_ROLLUPS)
+    base, peak = await asyncio.gather(detectors.run_all(), peak_rightsizing.detect_peak_rightsizing())
+    return base + peak
 
 
 @app.get("/api/findings", response_model=FindingsResponse)
@@ -137,6 +142,60 @@ async def get_script(finding_id: str) -> Response:
         media_type="text/x-shellscript",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ----------------------------------------------------------------------------
+# PR3 — Peak rightsizing detail + thresholds settings
+# ----------------------------------------------------------------------------
+
+@app.get("/api/peak-rightsizing")
+async def get_peak_rightsizing() -> dict[str, object]:
+    rows = await peak_rightsizing.peak_rightsizing_details()
+    advisor_unsafe_n = sum(1 for r in rows if r.get("advisor_unsafe"))
+    by_verdict: dict[str, int] = {}
+    for r in rows:
+        v = r.get("verdict", "UNKNOWN")
+        by_verdict[v] = by_verdict.get(v, 0) + 1
+    return {
+        "rows": rows,
+        "summary": {
+            "total_vms": len(rows),
+            "advisor_unsafe": advisor_unsafe_n,
+            "by_verdict": by_verdict,
+        },
+        "thresholds": thresholds.to_dict(),
+        "cached_at": detectors.stamp(),
+    }
+
+
+class ThresholdsPatch(BaseModel):
+    """Subset of Thresholds fields. All optional — only sent fields are updated."""
+    downsize_cpu_p95_max:       float | None = None
+    downsize_mem_p95_max:       float | None = None
+    downsize_cpu_p99_high_conf: float | None = None
+    downsize_mem_p99_high_conf: float | None = None
+    upsize_cpu_p95_min:         float | None = None
+    upsize_mem_p95_min:         float | None = None
+    min_data_coverage:          float | None = None
+
+
+@app.get("/api/settings")
+async def get_settings() -> dict[str, float]:
+    return thresholds.to_dict()
+
+
+@app.post("/api/settings")
+async def post_settings(patch: ThresholdsPatch) -> dict[str, float]:
+    fields = {k: v for k, v in patch.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    try:
+        new = thresholds.update(**fields)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Drop the peak rightsizing cache so the next call re-evaluates with new thresholds.
+    cache.invalidate("peak_rightsizing:")
+    return thresholds.to_dict(new)
 
 
 @app.post("/api/cache/invalidate")

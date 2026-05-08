@@ -55,6 +55,32 @@ def test_billing_endpoint() -> None:
     assert body.get("source") in ("detected", "override", "fallback")
 
 
+def test_peak_rightsizing_endpoint() -> None:
+    r = client.get("/api/peak-rightsizing")
+    assert r.status_code == 200
+    body = r.json()
+    assert "rows" in body and "summary" in body and "thresholds" in body
+    assert body["summary"]["total_vms"] == len(body["rows"])
+    # Mock data has at least one advisor_unsafe row.
+    assert body["summary"]["advisor_unsafe"] >= 1
+
+
+def test_settings_get_and_post() -> None:
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    t = r.json()
+    assert "downsize_cpu_p95_max" in t
+    # Update one field
+    r = client.post("/api/settings", json={"downsize_cpu_p95_max": 55.0})
+    assert r.status_code == 200
+    assert r.json()["downsize_cpu_p95_max"] == 55.0
+    # Invalid (downsize >= upsize) should 400
+    r = client.post("/api/settings", json={"downsize_cpu_p95_max": 90.0})
+    assert r.status_code == 400
+    # Reset
+    client.post("/api/settings", json={"downsize_cpu_p95_max": 40.0})
+
+
 def test_script_download() -> None:
     findings = client.get("/api/findings").json()["findings"]
     fid = findings[0]["id"]

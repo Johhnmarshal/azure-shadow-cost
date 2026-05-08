@@ -1,0 +1,21 @@
+// Non-managed VMs eligible for peak rightsizing analysis.
+//
+// Excluded by design (managed by parent service):
+//   - resource groups starting with `databricks-rg-` or `MC_` / `mc_`
+//   - VMs whose name starts with `aks-` (AKS-managed)
+//
+// We need `properties.hardwareProfile.vmSize` to resolve memory; rows
+// without it are dropped.
+Resources
+| where type =~ 'microsoft.compute/virtualmachines'
+| where resourceGroup !startswith 'databricks-rg-'
+| where resourceGroup !startswith 'mc_' and resourceGroup !startswith 'MC_'
+| where name !startswith 'aks-'
+| extend size  = tostring(properties.hardwareProfile.vmSize)
+| where isnotempty(size)
+| extend os    = tostring(properties.storageProfile.osDisk.osType)
+| extend power = tostring(properties.extended.instanceView.powerState.code)
+| extend owner = coalesce(tostring(tags['Owner']), '(untagged)')
+| extend env   = coalesce(tostring(tags['Environment']), 'unknown')
+| project id, name, resourceGroup, location, size, os, power, owner, env, tags
+| order by name asc

@@ -107,6 +107,26 @@
   .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--ink-mute);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px}
   @keyframes spin{to{transform:rotate(360deg)}}
 
+  /* Peak Rightsizing — verdict pills */
+  .pill.downsize{background:rgba(52,211,153,.18);color:#86efac}
+  .pill.upsize{background:rgba(239,68,68,.2);color:#fca5a5}
+  .pill.keep{background:rgba(148,163,184,.18);color:#cbd5e1}
+  .pill.insufficient{background:rgba(100,116,139,.22);color:#94a3b8}
+  .pill.unsafe{background:rgba(239,68,68,.25);color:#fecaca;border:1px solid rgba(239,68,68,.45)}
+
+  /* Settings modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(11,18,32,.72);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;width:min(560px,92vw);max-height:88vh;overflow:auto}
+  .modal h3{margin:0 0 6px}
+  .modal .form-row{display:grid;grid-template-columns:1fr 110px;gap:10px;align-items:center;margin-bottom:8px}
+  .modal .form-row label{color:var(--ink-dim);font-size:13px}
+  .modal .form-row input{font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line);padding:6px 10px;border-radius:8px;font-variant-numeric:tabular-nums;text-align:right}
+  .modal .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+  .modal .err{color:#fca5a5;font-size:12.5px;margin-top:6px}
+  .icon-btn{background:transparent;border:1px solid var(--line);color:var(--ink-dim);padding:7px 9px;border-radius:8px;cursor:pointer;font-size:14px;line-height:1}
+  .icon-btn:hover{color:#fff;border-color:var(--accent)}
+
   @media (max-width:1100px){
     .kpis{grid-template-columns:repeat(2,1fr)}
     .grid{grid-template-columns:1fr}
@@ -128,6 +148,7 @@
     <div class="tabs" id="tabs">
       <button class="tab on" data-tab="dashboard">Dashboard</button>
       <button class="tab" data-tab="findings">Findings</button>
+      <button class="tab" data-tab="peak">Peak Rightsizing</button>
       <button class="tab" data-tab="about">About</button>
     </div>
   </div>
@@ -155,6 +176,7 @@
       <input id="searchBox" placeholder="Search findings…" />
     </div>
     <button class="btn ghost" id="refreshBtn" title="Bypass cache">Refresh</button>
+    <button class="icon-btn" id="settingsBtn" title="Peak rightsizing thresholds">⚙</button>
   </div>
 
   <div id="banner"></div>
@@ -260,6 +282,111 @@
     </div>
   </div>
 
+  <!-- PEAK RIGHTSIZING -->
+  <div id="view-peak" class="hidden">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Advisor recs flagged unsafe</div>
+        <div class="value" id="peak-unsafe">—</div>
+        <div class="sub">Advisor wants to downsize; P95 says don't</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Downsize candidates (engine)</div>
+        <div class="value" id="peak-downsize-n">—</div>
+        <div class="sub">Safe downsizes proposed by P95/P99</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Upsize warnings</div>
+        <div class="value" id="peak-upsize-n">—</div>
+        <div class="sub">VMs at peak saturation; pre-empt incidents</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">VMs analysed</div>
+        <div class="value" id="peak-total">—</div>
+        <div class="sub" id="peak-cached-at">—</div>
+        <div class="bar"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <h3 style="margin:0">Per-VM detail</h3>
+        <span class="small">P95/P99 over the last 30 days. Click "⚙" to tune thresholds.</span>
+        <div class="spacer"></div>
+        <div class="chips" id="verdictChips">
+          <button class="chip on" data-verdict="all">All</button>
+          <button class="chip" data-verdict="DOWNSIZE_CANDIDATE">Downsize</button>
+          <button class="chip" data-verdict="UPSIZE_WARNING">Upsize</button>
+          <button class="chip" data-verdict="KEEP">Keep</button>
+          <button class="chip" data-verdict="INSUFFICIENT_DATA">No data</button>
+          <button class="chip" data-verdict="advisor_unsafe">Advisor unsafe</button>
+        </div>
+      </div>
+      <div style="overflow:auto;max-height:680px">
+        <table id="peakTable">
+          <thead><tr>
+            <th data-sort="name">VM</th>
+            <th data-sort="resourceGroup">RG</th>
+            <th data-sort="size">Size</th>
+            <th data-sort="env">Env</th>
+            <th data-sort="cpu_p95" class="right">CPU P95</th>
+            <th data-sort="cpu_p99" class="right">CPU P99</th>
+            <th data-sort="mem_p95_used" class="right">Mem P95</th>
+            <th data-sort="mem_p99_used" class="right">Mem P99</th>
+            <th data-sort="coverage" class="right">Coverage</th>
+            <th data-sort="verdict">Verdict</th>
+            <th data-sort="confidence">Conf.</th>
+            <th>Advisor</th>
+            <th>Proposed</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="small" id="peak-count" style="margin-top:10px"></p>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div class="modal-bg" id="settingsModal">
+    <div class="modal">
+      <h3>Peak rightsizing thresholds</h3>
+      <p class="small" style="margin:0 0 14px">
+        Conservative defaults are safe for spiky / batch workloads. Loosen only after several
+        nightly cycles validate the output. CPU and memory values are 0–100; coverage is 0–1.
+      </p>
+      <div class="form-row">
+        <label>Downsize CPU P95 max</label><input id="t-ds-cpu-p95" type="number" step="1" min="0" max="100" />
+      </div>
+      <div class="form-row">
+        <label>Downsize Mem P95 max</label><input id="t-ds-mem-p95" type="number" step="1" min="0" max="100" />
+      </div>
+      <div class="form-row">
+        <label>Downsize CPU P99 (HIGH conf)</label><input id="t-ds-cpu-p99" type="number" step="1" min="0" max="100" />
+      </div>
+      <div class="form-row">
+        <label>Downsize Mem P99 (HIGH conf)</label><input id="t-ds-mem-p99" type="number" step="1" min="0" max="100" />
+      </div>
+      <div class="form-row">
+        <label>Upsize CPU P95 min</label><input id="t-us-cpu-p95" type="number" step="1" min="0" max="100" />
+      </div>
+      <div class="form-row">
+        <label>Upsize Mem P95 min</label><input id="t-us-mem-p95" type="number" step="1" min="0" max="100" />
+      </div>
+      <div class="form-row">
+        <label>Min data coverage (0–1)</label><input id="t-min-cov" type="number" step="0.05" min="0" max="1" />
+      </div>
+      <div class="err" id="settings-err"></div>
+      <div class="actions">
+        <button class="btn ghost" id="settings-cancel">Cancel</button>
+        <button class="btn ghost" id="settings-reset" title="Re-read env defaults">Reset</button>
+        <button class="btn" id="settings-save">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ABOUT -->
   <div id="view-about" class="hidden">
     <div class="panel">
@@ -309,6 +436,10 @@ const state = {
   findings:[], gap:0,
   currencyCode:"USD", currencyGlyph:"$",
   tab:"dashboard", sortKey:"savings_monthly_usd", sortDir:-1,
+  // PR3 — peak rightsizing
+  peakRows:[], peakSummary:{total_vms:0,advisor_unsafe:0,by_verdict:{}}, peakCachedAt:null,
+  verdict:"all", peakSortKey:"name", peakSortDir:1,
+  thresholds:{},
 };
 const ch = {};
 
@@ -553,15 +684,175 @@ function refresh(){
   renderTable(rows);
 }
 
+/* ============== PR3 — Peak rightsizing ============== */
+function fmtPct(n){ return n == null ? "—" : (n.toFixed(1) + "%"); }
+const verdictPill = {
+  DOWNSIZE_CANDIDATE:["downsize","Downsize"],
+  UPSIZE_WARNING:   ["upsize",  "Upsize"],
+  KEEP:             ["keep",    "Keep"],
+  INSUFFICIENT_DATA:["insufficient","No data"],
+};
+
+async function loadPeak(){
+  try{
+    const data = await fetchJSON("/api/peak-rightsizing");
+    state.peakRows = data.rows || [];
+    state.peakSummary = data.summary || {total_vms:0,advisor_unsafe:0,by_verdict:{}};
+    state.peakCachedAt = data.cached_at;
+    if(data.thresholds) state.thresholds = data.thresholds;
+    renderPeak();
+  }catch(e){
+    setBanner(`Failed to load peak rightsizing: ${e.message}`, "warn");
+  }
+}
+
+function applyPeakFilter(){
+  if(state.verdict === "all") return state.peakRows.slice();
+  if(state.verdict === "advisor_unsafe") return state.peakRows.filter(r => r.advisor_unsafe);
+  return state.peakRows.filter(r => r.verdict === state.verdict);
+}
+
+function renderPeak(){
+  const s = state.peakSummary;
+  document.getElementById("peak-unsafe").textContent     = fmtInt(s.advisor_unsafe || 0);
+  document.getElementById("peak-downsize-n").textContent = fmtInt(s.by_verdict?.DOWNSIZE_CANDIDATE || 0);
+  document.getElementById("peak-upsize-n").textContent   = fmtInt(s.by_verdict?.UPSIZE_WARNING || 0);
+  document.getElementById("peak-total").textContent      = fmtInt(s.total_vms || 0);
+  document.getElementById("peak-cached-at").textContent  = state.peakCachedAt
+    ? `cached at ${state.peakCachedAt}` : "—";
+  renderPeakTable();
+}
+
+function renderPeakTable(){
+  const rows = applyPeakFilter();
+  const sk = state.peakSortKey, dir = state.peakSortDir;
+  const sorted = [...rows].sort((a,b)=>{
+    const av = a[sk], bv = b[sk];
+    if(av == null && bv == null) return 0;
+    if(av == null) return 1;
+    if(bv == null) return -1;
+    if(typeof av === "string"){ return av.localeCompare(bv) * dir; }
+    return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
+  });
+  const body = document.querySelector("#peakTable tbody");
+  body.innerHTML = sorted.map(r=>{
+    const [vc, vl] = verdictPill[r.verdict] || ["keep", r.verdict];
+    const advHTML = r.advisor_unsafe ? `<span class="pill unsafe" title="Advisor wants a downsize that would be unsafe at P95">unsafe</span>`
+                  : r.advisor_advised ? `<span class="pill keep" title="Advisor advised; engine concurs">advised</span>`
+                  : `<span class="small">—</span>`;
+    return `<tr>
+      <td><div>${r.name}</div><div class="small mono">${r.location||""}</div></td>
+      <td class="small">${r.resourceGroup}</td>
+      <td class="mono small">${r.size}</td>
+      <td>${r.env}</td>
+      <td class="right num">${fmtPct(r.cpu_p95)}</td>
+      <td class="right num">${fmtPct(r.cpu_p99)}</td>
+      <td class="right num">${fmtPct(r.mem_p95_used)}</td>
+      <td class="right num">${fmtPct(r.mem_p99_used)}</td>
+      <td class="right num">${(r.coverage*100).toFixed(0)}%</td>
+      <td><span class="pill ${vc}">${vl}</span></td>
+      <td><span class="pill ${(r.confidence||"low").toLowerCase()==="high"?"actual":(r.confidence||"low").toLowerCase()==="medium"?"mixed":"estimate"}">${r.confidence||"—"}</span></td>
+      <td>${advHTML}</td>
+      <td class="mono small">${r.proposed_size||"—"}</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("peak-count").textContent =
+    `Showing ${sorted.length} of ${state.peakRows.length} VMs`;
+}
+
+document.getElementById("verdictChips").addEventListener("click", e=>{
+  const b = e.target.closest(".chip"); if(!b) return;
+  document.querySelectorAll("#verdictChips .chip").forEach(c=>c.classList.toggle("on", c===b));
+  state.verdict = b.dataset.verdict; renderPeakTable();
+});
+
+document.querySelectorAll("#peakTable thead th").forEach(th=>{
+  th.addEventListener("click", ()=>{
+    const k = th.dataset.sort; if(!k) return;
+    if(state.peakSortKey===k) state.peakSortDir = -state.peakSortDir;
+    else { state.peakSortKey = k; state.peakSortDir = 1; }
+    renderPeakTable();
+  });
+});
+
+/* ============== Settings modal ============== */
+const T_FIELD_IDS = {
+  "t-ds-cpu-p95":"downsize_cpu_p95_max",
+  "t-ds-mem-p95":"downsize_mem_p95_max",
+  "t-ds-cpu-p99":"downsize_cpu_p99_high_conf",
+  "t-ds-mem-p99":"downsize_mem_p99_high_conf",
+  "t-us-cpu-p95":"upsize_cpu_p95_min",
+  "t-us-mem-p95":"upsize_mem_p95_min",
+  "t-min-cov":"min_data_coverage",
+};
+
+async function openSettings(){
+  try{
+    const t = await fetchJSON("/api/settings");
+    state.thresholds = t;
+    for(const [eid, key] of Object.entries(T_FIELD_IDS)){
+      document.getElementById(eid).value = t[key];
+    }
+    document.getElementById("settings-err").textContent = "";
+    document.getElementById("settingsModal").classList.add("show");
+  }catch(e){
+    setBanner(`Couldn't load settings: ${e.message}`, "warn");
+  }
+}
+
+function closeSettings(){
+  document.getElementById("settingsModal").classList.remove("show");
+}
+
+async function saveSettings(){
+  const errEl = document.getElementById("settings-err");
+  errEl.textContent = "";
+  const patch = {};
+  for(const [eid, key] of Object.entries(T_FIELD_IDS)){
+    const v = parseFloat(document.getElementById(eid).value);
+    if(isNaN(v)){ errEl.textContent = `Invalid number in "${key}"`; return; }
+    patch[key] = v;
+  }
+  try{
+    const t = await fetchJSON("/api/settings", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(patch),
+    });
+    state.thresholds = t;
+    closeSettings();
+    if(state.tab === "peak") loadPeak();
+  }catch(e){
+    errEl.textContent = e.message;
+  }
+}
+
+document.getElementById("settingsBtn").addEventListener("click", openSettings);
+document.getElementById("settings-cancel").addEventListener("click", closeSettings);
+document.getElementById("settings-save").addEventListener("click", saveSettings);
+document.getElementById("settings-reset").addEventListener("click", async ()=>{
+  // Reset = reload from server (env-driven defaults if no overrides applied yet).
+  try {
+    const t = await fetchJSON("/api/settings");
+    for(const [eid, key] of Object.entries(T_FIELD_IDS)){
+      document.getElementById(eid).value = t[key];
+    }
+  } catch {}
+});
+document.getElementById("settingsModal").addEventListener("click", e=>{
+  if(e.target.id === "settingsModal") closeSettings();
+});
+
 /* Tabs */
 document.getElementById("tabs").addEventListener("click", e=>{
   const b = e.target.closest(".tab"); if(!b) return;
   state.tab = b.dataset.tab;
   document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("on", x===b));
-  ["dashboard","findings","about"].forEach(v=>{
+  ["dashboard","findings","peak","about"].forEach(v=>{
     document.getElementById("view-"+v).classList.toggle("hidden", v!==state.tab);
   });
   if(state.tab==="dashboard") setTimeout(refresh, 0);
+  if(state.tab==="peak" && state.peakRows.length === 0) loadPeak();
 });
 
 /* Filter chips (delegated, since category chips are rebuilt) */
@@ -585,6 +876,7 @@ document.getElementById("subPicker").addEventListener("change", e=>{
 document.getElementById("refreshBtn").addEventListener("click", async ()=>{
   try { await fetch("/api/cache/invalidate", {method:"POST"}); } catch{}
   loadFindings();
+  if(state.tab === "peak") loadPeak();
 });
 
 document.querySelectorAll("#findings thead th").forEach(th=>{

@@ -1,0 +1,14 @@
+// Azure Advisor "Cost — Resize Virtual Machine" recommendations.
+// Used by the peak-rightsizing engine to compute the *advisor_unsafe* diff:
+// any Advisor 'downsize' suggestion that our P95-based engine would
+// classify as KEEP or UPSIZE_WARNING is surfaced as the headline metric.
+AdvisorResources
+| where type =~ 'microsoft.advisor/recommendations'
+| where properties.category =~ 'Cost'
+| where properties.impactedField =~ 'microsoft.compute/virtualmachines'
+| extend impactedValue = tolower(tostring(properties.impactedValue))
+| extend shortDesc     = tostring(properties.shortDescription.problem)
+| extend savings       = todouble(properties.extendedProperties.annualSavingsAmount)
+| extend isResize      = shortDesc has_cs 'Resize' or shortDesc has_cs 'right-size' or shortDesc has_cs 'Right-size'
+| project resourceGroup, impactedValue, shortDesc, savings, isResize
+| order by savings desc
