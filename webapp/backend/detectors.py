@@ -424,8 +424,10 @@ ALL_DETECTORS = (
     detect_empty_app_service_plans,
     # Tagging
     detect_tagging_gap,
-    # Commitment
-    detect_commitment_drift,
+    # Commitment — handled by ri_coverage (PR4); orchestrated in app.py
+    # `detect_commitment_drift` retained below for historical reference but
+    # no longer registered. Existing-RI utilization will return as its own
+    # detector after PR5 once Reservations Reader RBAC is widely granted.
     # Data plane
     detect_overprovisioned_storage,
     detect_long_retention_log_analytics,

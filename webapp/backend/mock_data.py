@@ -6,9 +6,16 @@ what the live detectors would return so the SPA renders identically.
 PR2: every mock finding now carries a ``cost_source`` so the SPA's pill
 renders without an Azure billing context. Values are spread across
 ``actual``, ``mixed``, and ``estimate`` to exercise all three rendering paths.
+
+PR3: peak-rightsizing rollup Findings + per-VM detail rows.
+
+PR4: commitment_drift mock removed; replaced by ri_coverage GroupAnalysis +
+rollup. Buffer is hardcoded to 5,000 in the mock — the SPA's RI Coverage
+tab lets the operator override.
 """
 from __future__ import annotations
 
+from . import ri_coverage as _ric
 from .models import Finding
 
 
@@ -68,17 +75,7 @@ MOCK_FINDINGS: list[Finding] = [
         risk="Low", tier="Crawl",
         business_value="Largest source of unattributed compute spend; tag, then chargeback.",
     ),
-    Finding(
-        id="mock:commitment_drift",
-        detector="commitment_drift",
-        category="Commitment",
-        resource="6 reservations under 70% utilization (last 30d)",
-        resource_ids=["mock-reservation-1", "mock-reservation-2"],
-        owner="finops", env="prod",
-        savings_monthly_usd=8400, cost_source="estimate", effort_hours=10,
-        risk="Medium", tier="Walk",
-        business_value="Exchange or right-size before renewal. Underused commitments lock today's inefficiency in for 1–3 years.",
-    ),
+    # PR4: commitment_drift removed — replaced by ri_coverage (forward-looking).
     Finding(
         id="mock:storage_overprov",
         detector="storage_overprovisioned_redundancy",
@@ -178,7 +175,7 @@ MOCK_PEAK_DETAILS: list[dict] = [
         "id": f"{_PEAK_VM}/vm-batch-night-04", "name": "vm-batch-night-04",
         "resourceGroup": "rg-batch", "location": "uksouth",
         "size": "Standard_E16ds_v5", "owner": "data-eng", "env": "prod",
-        "cpu_p95": 18.4, "cpu_p99": 92.7,    # bursty: low avg, but P99 saturated
+        "cpu_p95": 18.4, "cpu_p99": 92.7,
         "mem_p95_used": 22.0, "mem_p99_used": 88.0,
         "coverage": 0.96,
         "verdict": "KEEP", "confidence": "MEDIUM",
@@ -246,9 +243,59 @@ MOCK_PEAK_DETAILS: list[dict] = [
         "size": "Standard_E8s_v5", "owner": "ml-research", "env": "nonprod",
         "cpu_p95": 4.0, "cpu_p99": 6.0,
         "mem_p95_used": 8.0, "mem_p99_used": 11.0,
-        "coverage": 0.45,  # below min_data_coverage
+        "coverage": 0.45,
         "verdict": "INSUFFICIENT_DATA", "confidence": "LOW",
         "advisor_advised": False, "advisor_unsafe": False,
         "proposed_size": None,
     },
+]
+
+
+# ---------------------------------------------------------------------------
+# PR4 — RI/SP coverage groups + rollup
+# ---------------------------------------------------------------------------
+
+# Synthetic 3-month PAYG VM consumption per (family, region). CV-ranges chosen
+# to land one group in each stability bucket: STABLE / VARIABLE / UNSTABLE.
+_MOCK_RI_GROUPS_RAW: list[tuple[str, str, list[float]]] = [
+    ("Dsv5 Series",  "uksouth", [18000.0, 17800.0, 18200.0]),  # CV ~0.01 — STABLE
+    ("Esv5 Series",  "uksouth", [14500.0, 15000.0, 14800.0]),  # STABLE
+    ("Bs Series",    "uksouth", [6300.0,  6500.0,  6400.0]),   # STABLE
+    ("Fsv2 Series",  "westeu",  [2100.0,  2400.0,  2200.0]),   # STABLE/VARIABLE
+    ("Dasv5 Series", "uksouth", [9500.0,  11000.0, 13000.0]),  # VARIABLE
+    ("Mv2 Series",   "uksouth", [4000.0,  1500.0,  8000.0]),   # UNSTABLE
+]
+
+
+MOCK_RI_GROUPS = [
+    _ric.analyse_group(family, region, costs)
+    for family, region, costs in _MOCK_RI_GROUPS_RAW
+]
+
+
+# A single rollup Finding for the dashboard. Pre-computed from the synthetic
+# 5,000-buffer pack; numbers match the buffer-bounded shortlist of
+# {Dsv5, Esv5, Bs, Fsv2} (the four LOW-risk groups).
+MOCK_RI_ROLLUPS: list[Finding] = [
+    Finding(
+        id="mock:ri_coverage",
+        detector="ri_coverage",
+        category="Commitment",
+        resource="4 RI/SP picks fit within 5,000 buffer",
+        resource_ids=[
+            "Dsv5 Series|uksouth",
+            "Esv5 Series|uksouth",
+            "Bs Series|uksouth",
+            "Fsv2 Series|westeu",
+        ],
+        owner="finops", env="prod",
+        savings_monthly_usd=820, cost_source="actual", effort_hours=4,
+        risk="Medium", tier="Walk", confidence="HIGH",
+        business_value=(
+            "Commit only what fits inside your cancellation-exposure buffer. The binding "
+            "constraint is procurement policy, not the data — raise the buffer to unlock "
+            "the rejected list, but never reserve a workload that should be downsized first "
+            "(cross-check against Peak Rightsizing)."
+        ),
+    ),
 ]

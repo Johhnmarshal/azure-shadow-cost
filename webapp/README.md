@@ -143,9 +143,10 @@ naming explicitly because they shape every PR:
 | GET | `/api/peak-rightsizing` | Per-VM peak detail + summary (PR3) |
 | GET | `/api/settings` | Current peak-rightsizing thresholds (PR3) |
 | POST | `/api/settings` | Atomic threshold update (PR3) |
+| GET | `/api/ri-coverage` | RI/SP coverage analysis with optional `?buffer` (PR4) |
 | POST | `/api/cache/invalidate` | Drop the in-memory cache |
 
-PRs 4-5 add `/api/ri-coverage`, `/api/queues/{owner}.md`,
+PR5 adds `/api/queues/{owner}.md`,
 `/api/policies/{category}.json`, and `/api/workbooks/{name}.json`.
 
 ## Peak rightsizing (PR3)
