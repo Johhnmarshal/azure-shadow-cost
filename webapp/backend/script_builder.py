@@ -13,7 +13,9 @@ from .config import settings
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
-# Map detector name → template filename.
+# Map detector name → template filename. Detectors with no entry here emit
+# an HTTP 400 from /api/findings/{id}/script — they're advisory-only
+# (e.g. peak_upsize, peak_advisor_unsafe) where there's no safe automation.
 _TEMPLATES = {
     "unattached_disks":              "delete_unattached_disks.sh",
     "unused_public_ips":             "release_unused_public_ips.sh",
@@ -22,10 +24,8 @@ _TEMPLATES = {
     "long_retention_log_analytics":  "set_log_analytics_retention.sh",
     "storage_overprovisioned_redundancy": "downgrade_storage_redundancy.sh",
     "overprovisioned_cosmos":        "disable_cosmos_multi_region.sh",
-    "commitment_drift":              "review_commitment_drift.sh",
-    "commitment_advisory":           "review_commitment_drift.sh",
     "peak_downsize":                 "downsize_vms.sh",
-    # Upsize / advisor-unsafe findings are advisory only — no remediation script.
+    "ri_coverage":                   "review_ri_shortlist.sh",
 }
 
 

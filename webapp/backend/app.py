@@ -11,6 +11,7 @@ GET  /api/findings/{id}/script        Returns the generated bash remediation as 
 GET  /api/peak-rightsizing            Per-VM peak rightsizing detail + summary (PR3).
 GET  /api/settings                    Current peak-rightsizing thresholds (PR3).
 POST /api/settings                    Atomic update of one or more thresholds (PR3).
+GET  /api/ri-coverage                 RI/SP coverage analysis with optional ?buffer (PR4).
 POST /api/cache/invalidate            Drops the in-memory cache (auth-gate this in v1.1).
 
 Static SPA is mounted at "/" from ../frontend.
@@ -26,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import billing, detectors, mock_data, peak_rightsizing, script_builder, thresholds
+from . import billing, detectors, mock_data, peak_rightsizing, ri_coverage, script_builder, thresholds
 from .az_clients import credential, subscriptions
 from .cache import cache
 from .config import settings
@@ -108,9 +109,17 @@ async def list_subscriptions() -> list[dict[str, str]]:
 
 async def _findings() -> list[Finding]:
     if settings().use_mock_data:
-        return list(mock_data.MOCK_FINDINGS) + list(mock_data.MOCK_PEAK_ROLLUPS)
-    base, peak = await asyncio.gather(detectors.run_all(), peak_rightsizing.detect_peak_rightsizing())
-    return base + peak
+        return (
+            list(mock_data.MOCK_FINDINGS)
+            + list(mock_data.MOCK_PEAK_ROLLUPS)
+            + list(mock_data.MOCK_RI_ROLLUPS)
+        )
+    base, peak, ri = await asyncio.gather(
+        detectors.run_all(),
+        peak_rightsizing.detect_peak_rightsizing(),
+        ri_coverage.detect_ri_coverage(),
+    )
+    return base + peak + ri
 
 
 @app.get("/api/findings", response_model=FindingsResponse)
@@ -193,10 +202,27 @@ async def post_settings(patch: ThresholdsPatch) -> dict[str, float]:
         new = thresholds.update(**fields)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # Drop the peak rightsizing cache so the next call re-evaluates with new thresholds.
     cache.invalidate("peak_rightsizing:")
     return thresholds.to_dict(new)
 
+
+# ----------------------------------------------------------------------------
+# PR4 — RI / SP coverage with refund-buffer guardrail
+# ----------------------------------------------------------------------------
+
+@app.get("/api/ri-coverage")
+async def get_ri_coverage(buffer: float | None = None) -> dict[str, object]:
+    """RI/SP coverage analysis. ``buffer`` is the operator's cancellation-
+    exposure cap in tenant currency. If unset, falls back to AZSHC_REFUND_BUFFER
+    env var. If still unset, returns analysis without shortlist + ``buffer_required: true``.
+    """
+    effective = buffer if buffer is not None else ri_coverage.env_buffer()
+    return await ri_coverage.ri_coverage_details(effective)
+
+
+# ----------------------------------------------------------------------------
+# Cache control
+# ----------------------------------------------------------------------------
 
 @app.post("/api/cache/invalidate")
 async def invalidate() -> dict[str, int]:

@@ -149,6 +149,7 @@
       <button class="tab on" data-tab="dashboard">Dashboard</button>
       <button class="tab" data-tab="findings">Findings</button>
       <button class="tab" data-tab="peak">Peak Rightsizing</button>
+      <button class="tab" data-tab="ri">RI Coverage</button>
       <button class="tab" data-tab="about">About</button>
     </div>
   </div>
@@ -383,6 +384,120 @@
         <button class="btn ghost" id="settings-cancel">Cancel</button>
         <button class="btn ghost" id="settings-reset" title="Re-read env defaults">Reset</button>
         <button class="btn" id="settings-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RI COVERAGE -->
+  <div id="view-ri" class="hidden">
+    <div class="panel" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px">
+          <h3 style="margin:0">RI / Savings-Plan coverage</h3>
+          <p class="hint" style="margin:6px 0 0">
+            Aggregates 3 months of PAYG VM consumption by family × region, picks RI 1Y or
+            Compute SP 1Y per stability bucket, greedy-packs LOW + MEDIUM risk into your
+            cancellation-exposure buffer.
+            <b>The buffer is procurement policy, not a default — set it explicitly.</b>
+          </p>
+        </div>
+        <div class="filter-group" style="align-items:flex-end">
+          <label>Refund buffer (<span id="ri-ccy">$</span>)</label>
+          <input id="riBufferInput" type="number" min="0" step="500" placeholder="5000"
+                 style="width:140px;text-align:right" />
+          <button class="btn" id="riApply">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="riPrompt" class="banner info" style="margin-bottom:14px;display:none">
+      Set a refund buffer above to compute the shortlist. Microsoft's cancellation fee
+      is 12% of annual commit, so a buffer of 5,000 covers ~41,000 of safely-cancellable
+      annual commit.
+    </div>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Buffer used</div>
+        <div class="value"><span id="ri-used">—</span></div>
+        <div class="sub" id="ri-used-sub">of buffer set above</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Annual savings (shortlist)</div>
+        <div class="value" id="ri-save">—</div>
+        <div class="sub">if all picks committed</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Picks in shortlist</div>
+        <div class="value" id="ri-picks">—</div>
+        <div class="sub" id="ri-picks-sub">LOW + MEDIUM risk only</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Family×region groups</div>
+        <div class="value" id="ri-groups">—</div>
+        <div class="sub">analysed against PAYG history</div>
+        <div class="bar"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Shortlist — picks within buffer</h3>
+      <p class="hint">
+        Sorted by descending annual savings. Cross-check each row against Peak Rightsizing
+        before committing — never reserve a workload that should be downsized first.
+      </p>
+      <div style="overflow:auto;max-height:380px">
+        <table id="riShortTable">
+          <thead><tr>
+            <th>Family × Region</th>
+            <th>Stability</th>
+            <th>Risk</th>
+            <th>Product</th>
+            <th class="right">Monthly mean</th>
+            <th class="right">CV</th>
+            <th class="right">Annual PAYG</th>
+            <th class="right">Annual save</th>
+            <th class="right">Cancel exposure</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="small" id="ri-short-count" style="margin-top:8px"></p>
+    </div>
+
+    <div class="grid" style="margin-top:14px">
+      <div class="panel">
+        <h3>Rejected — over buffer</h3>
+        <p class="hint">LOW/MEDIUM risk picks that didn't fit. Raise the buffer to unlock.</p>
+        <div style="overflow:auto;max-height:280px">
+          <table id="riOverTable">
+            <thead><tr>
+              <th>Family × Region</th>
+              <th>Risk</th>
+              <th class="right">Annual save</th>
+              <th class="right">Exposure</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Deferred — too variable for commitment</h3>
+        <p class="hint">UNSTABLE (CV ≥ 30%). Stabilise consumption first; revisit after 60 days of consistent monthly burn.</p>
+        <div style="overflow:auto;max-height:280px">
+          <table id="riHighTable">
+            <thead><tr>
+              <th>Family × Region</th>
+              <th class="right">CV</th>
+              <th class="right">Monthly mean</th>
+              <th class="right">If committed (annual save)</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -848,11 +963,12 @@ document.getElementById("tabs").addEventListener("click", e=>{
   const b = e.target.closest(".tab"); if(!b) return;
   state.tab = b.dataset.tab;
   document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("on", x===b));
-  ["dashboard","findings","peak","about"].forEach(v=>{
+  ["dashboard","findings","peak","ri","about"].forEach(v=>{
     document.getElementById("view-"+v).classList.toggle("hidden", v!==state.tab);
   });
   if(state.tab==="dashboard") setTimeout(refresh, 0);
   if(state.tab==="peak" && state.peakRows.length === 0) loadPeak();
+  if(state.tab==="ri") loadRi();
 });
 
 /* Filter chips (delegated, since category chips are rebuilt) */
@@ -877,6 +993,108 @@ document.getElementById("refreshBtn").addEventListener("click", async ()=>{
   try { await fetch("/api/cache/invalidate", {method:"POST"}); } catch{}
   loadFindings();
   if(state.tab === "peak") loadPeak();
+  if(state.tab === "ri") loadRi();
+});
+
+/* ============== PR4 — RI Coverage ============== */
+const RI_BUFFER_KEY = "azshc.riBuffer";
+state.riBuffer = (function(){
+  try { const v = localStorage.getItem(RI_BUFFER_KEY); return v ? parseFloat(v) : null; } catch { return null; }
+})();
+
+function fmtRi(n){
+  if(n == null || isNaN(n)) return "—";
+  return fmtMoney(n);
+}
+
+async function loadRi(){
+  // Mirror the currency glyph next to the buffer label.
+  document.getElementById("ri-ccy").textContent = state.currencyGlyph || "$";
+  const inp = document.getElementById("riBufferInput");
+  if(state.riBuffer != null && !inp.value) inp.value = state.riBuffer;
+
+  const url = state.riBuffer != null && state.riBuffer > 0
+    ? `/api/ri-coverage?buffer=${encodeURIComponent(state.riBuffer)}`
+    : `/api/ri-coverage`;
+  let data;
+  try { data = await fetchJSON(url); }
+  catch(e){ setBanner(`RI coverage failed: ${e.message}`, "warn"); return; }
+
+  document.getElementById("riPrompt").style.display = data.buffer_required ? "" : "none";
+
+  // KPIs
+  const buffer = data.buffer || 0;
+  const used = data.running_exposure || 0;
+  document.getElementById("ri-used").textContent =
+    data.buffer_required ? "—" : `${fmtMoney(used)} / ${fmtMoney(buffer)}`;
+  document.getElementById("ri-used-sub").textContent =
+    data.buffer_required ? "set buffer above" : `${Math.round((used/Math.max(buffer,1))*100)}% of buffer`;
+  document.getElementById("ri-save").textContent = fmtRi(data.total_annual_savings || 0);
+  document.getElementById("ri-picks").textContent = (data.shortlist || []).length;
+  document.getElementById("ri-groups").textContent = (data.groups || []).length;
+
+  renderRiShortlist(data.shortlist || []);
+  renderRiOverBuffer(data.rejected_over_buffer || []);
+  renderRiHighRisk(data.rejected_high_risk || []);
+}
+
+function _riRow(g){
+  return `<tr>
+    <td><div>${g.family}</div><div class="small mono">${g.region}</div></td>
+    <td><span class="small">${g.stability}</span></td>
+    <td><span class="pill ${g.risk==="LOW"?"low":g.risk==="MEDIUM"?"med":"high"}">${g.risk}</span></td>
+    <td class="small">${g.product}</td>
+    <td class="right num">${fmtMoney(g.monthly_mean)}</td>
+    <td class="right num">${(g.cv*100).toFixed(1)}%</td>
+    <td class="right num">${fmtMoney(g.annual_payg)}</td>
+    <td class="right num">${fmtMoney(g.annual_savings)}</td>
+    <td class="right num">${fmtMoney(g.cancellation_exposure)}</td>
+  </tr>`;
+}
+
+function renderRiShortlist(rows){
+  const sorted = [...rows].sort((a,b)=>b.annual_savings - a.annual_savings);
+  document.querySelector("#riShortTable tbody").innerHTML =
+    sorted.map(_riRow).join("") || `<tr><td colspan="9" class="small">No picks fit within the buffer yet — set or raise the buffer above.</td></tr>`;
+  document.getElementById("ri-short-count").textContent =
+    `${sorted.length} picks · ${fmtMoney(sorted.reduce((a,g)=>a+g.annual_savings,0))} annual savings`;
+}
+
+function renderRiOverBuffer(rows){
+  document.querySelector("#riOverTable tbody").innerHTML = rows.length
+    ? rows.map(g => `<tr>
+        <td><div>${g.family}</div><div class="small mono">${g.region}</div></td>
+        <td><span class="pill ${g.risk==="LOW"?"low":"med"}">${g.risk}</span></td>
+        <td class="right num">${fmtMoney(g.annual_savings)}</td>
+        <td class="right num">${fmtMoney(g.cancellation_exposure)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="4" class="small">All eligible picks fit — buffer not binding.</td></tr>`;
+}
+
+function renderRiHighRisk(rows){
+  document.querySelector("#riHighTable tbody").innerHTML = rows.length
+    ? rows.map(g => `<tr>
+        <td><div>${g.family}</div><div class="small mono">${g.region}</div></td>
+        <td class="right num">${(g.cv*100).toFixed(1)}%</td>
+        <td class="right num">${fmtMoney(g.monthly_mean)}</td>
+        <td class="right num">${fmtMoney(g.annual_savings)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="4" class="small">No HIGH-risk groups in scope.</td></tr>`;
+}
+
+document.getElementById("riApply").addEventListener("click", () => {
+  const v = parseFloat(document.getElementById("riBufferInput").value);
+  if(isNaN(v) || v < 0){
+    setBanner("Buffer must be a non-negative number.", "warn");
+    return;
+  }
+  state.riBuffer = v;
+  try { localStorage.setItem(RI_BUFFER_KEY, String(v)); } catch {}
+  setBanner("");
+  loadRi();
+});
+document.getElementById("riBufferInput").addEventListener("keypress", e => {
+  if(e.key === "Enter") document.getElementById("riApply").click();
 });
 
 document.querySelectorAll("#findings thead th").forEach(th=>{

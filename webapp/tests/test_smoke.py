@@ -81,6 +81,35 @@ def test_settings_get_and_post() -> None:
     client.post("/api/settings", json={"downsize_cpu_p95_max": 40.0})
 
 
+def test_ri_coverage_no_buffer() -> None:
+    """Without a buffer, the endpoint returns groups + buffer_required: true."""
+    r = client.get("/api/ri-coverage")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["buffer_required"] is True
+    assert body["shortlist"] == []
+    assert len(body["groups"]) >= 1
+    # High-risk groups still surface so the operator sees what's deferred
+    assert "rejected_high_risk" in body
+
+
+def test_ri_coverage_with_buffer() -> None:
+    """With a buffer, the endpoint computes a shortlist."""
+    r = client.get("/api/ri-coverage?buffer=5000")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["buffer"] == 5000
+    assert body["buffer_required"] is False
+    assert isinstance(body["shortlist"], list)
+    assert isinstance(body["running_exposure"], (int, float))
+    assert body["running_exposure"] <= 5000
+    # In mock data we expect at least one pick fitting in 5,000 buffer
+    assert len(body["shortlist"]) >= 1
+    # Every shortlisted item is LOW or MEDIUM risk
+    for g in body["shortlist"]:
+        assert g["risk"] in ("LOW", "MEDIUM")
+
+
 def test_script_download() -> None:
     findings = client.get("/api/findings").json()["findings"]
     fid = findings[0]["id"]
