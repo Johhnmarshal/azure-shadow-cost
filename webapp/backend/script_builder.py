@@ -38,7 +38,6 @@ def build(detector: str, resource_ids: list[str]) -> str:
     body = (TEMPLATE_DIR / name).read_text()
     header = (TEMPLATE_DIR / "_header.sh").read_text()
 
-    # Format the Azure resource ID list as a bash array.
     bash_array = "\n".join(f'  "{rid}"' for rid in resource_ids)
     if not bash_array:
         bash_array = '  # no resources matched at generation time'

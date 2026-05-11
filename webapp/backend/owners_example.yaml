@@ -1,0 +1,28 @@
+# Azure Shadow Cost — owner override map (PR5).
+#
+# Resolution order: Azure Tag → this YAML → CODEOWNERS → fallback.
+# This file is loaded at startup; the path is configurable via
+# AZSHC_OWNERS_YAML env var (default: webapp/backend/owners.yaml).
+#
+# Every key is case-insensitive. Values are arbitrary identifiers — the
+# enricher just routes findings to whatever string you put here. They
+# typically map to a GitHub team handle (`@org/finops`), a Teams channel
+# alias, or a simple email-prefix.
+
+defaults:
+  fallback: needs-attribution
+
+mappings:
+  by_subscription:
+    # 00000000-0000-0000-0000-000000000000: platform-team
+    # 11111111-1111-1111-1111-111111111111: data-platform
+
+  by_resource_group:
+    # rg-batch: data-eng
+    # rg-retail: retail-team
+    # rg-billing: billing-team
+
+  by_resource_type:
+    # microsoft.web/serverfarms: web-team
+    # microsoft.documentdb/databaseaccounts: data-platform
+    # microsoft.operationalinsights/workspaces: obs-team

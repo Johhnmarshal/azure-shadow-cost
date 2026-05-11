@@ -1,0 +1,46 @@
+{
+  "name": "azshc-deny-untagged-resources",
+  "type": "Microsoft.Authorization/policyDefinitions",
+  "apiVersion": "2021-06-01",
+  "properties": {
+    "displayName": "Audit: resources missing required allocation tags",
+    "description": "Surfaces every resource whose tag set is incomplete relative to the FinOps allocation taxonomy. Drives the Visibility Gap metric. Promote to Deny once the audit-mode false-positive rate is zero.",
+    "policyType": "Custom",
+    "mode": "Indexed",
+    "metadata": {
+      "category": "Cost",
+      "version": "1.0.0",
+      "source": "Azure Shadow Cost"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Effect",
+          "description": "Audit, AuditIfNotExists, Deny, or Disabled."
+        },
+        "allowedValues": ["Audit", "AuditIfNotExists", "Deny", "Disabled"],
+        "defaultValue": "Audit"
+      },
+      "requiredTags": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Required tags",
+          "description": "Tag keys that must be present on every resource in scope."
+        },
+        "defaultValue": ["Owner", "CostCenter", "Environment", "Application"]
+      }
+    },
+    "policyRule": {
+      "if": {
+        "anyOf": [
+          { "field": "tags['Owner']",       "exists": "false" },
+          { "field": "tags['CostCenter']",  "exists": "false" },
+          { "field": "tags['Environment']", "exists": "false" },
+          { "field": "tags['Application']", "exists": "false" }
+        ]
+      },
+      "then": { "effect": "[parameters('effect')]" }
+    }
+  }
+}

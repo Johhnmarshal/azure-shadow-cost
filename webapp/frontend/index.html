@@ -150,6 +150,7 @@
       <button class="tab" data-tab="findings">Findings</button>
       <button class="tab" data-tab="peak">Peak Rightsizing</button>
       <button class="tab" data-tab="ri">RI Coverage</button>
+      <button class="tab" data-tab="downloads">Downloads</button>
       <button class="tab" data-tab="about">About</button>
     </div>
   </div>
@@ -499,6 +500,67 @@
           </table>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- DOWNLOADS (PR5) -->
+  <div id="view-downloads" class="hidden">
+
+    <div class="grid">
+      <div class="panel">
+        <h3>Per-owner remediation queues</h3>
+        <p class="hint">
+          Findings grouped by owner using <b>Tag → YAML → CODEOWNERS</b> precedence.
+          Click an owner to download a Markdown queue with accept / defer / reject checkboxes —
+          ideal as a tracker issue body.
+        </p>
+        <div style="overflow:auto;max-height:480px">
+          <table id="queuesTable">
+            <thead><tr>
+              <th>Owner</th>
+              <th class="right">Findings</th>
+              <th class="right">$/mo</th>
+              <th class="right">Annualised</th>
+              <th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="small" id="queuesCount" style="margin-top:8px"></p>
+      </div>
+
+      <div class="panel">
+        <h3>Audit-mode Azure Policy starter pack</h3>
+        <p class="hint">
+          Five preventative controls that complement the detectors. All ship in
+          <b>audit</b> effect — assign at a pilot management group, monitor for
+          30 days, then promote to <b>deny</b>.
+        </p>
+        <div id="policyList"></div>
+        <div style="margin-top:10px">
+          <a class="btn" href="/api/policies/bundle.zip" download>Download all (.zip)</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <h3>Azure Workbook templates</h3>
+      <p class="hint">
+        Importable Workbook JSON for Azure Portal → Monitor → Workbooks. Each
+        reads from the matching Log Analytics custom table populated by your
+        ingestion pipeline.
+      </p>
+      <div id="workbookList"></div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <h3>Nightly automation</h3>
+      <p class="hint small">
+        A reference GitHub Actions workflow to run the analyses overnight and
+        post per-owner queues as tracker issues lives in
+        <code>automation/azshc-nightly.yml</code> in the repo. Adapt to your
+        deployment URL + secret-store conventions.
+      </p>
     </div>
   </div>
 
@@ -963,12 +1025,13 @@ document.getElementById("tabs").addEventListener("click", e=>{
   const b = e.target.closest(".tab"); if(!b) return;
   state.tab = b.dataset.tab;
   document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("on", x===b));
-  ["dashboard","findings","peak","ri","about"].forEach(v=>{
+  ["dashboard","findings","peak","ri","downloads","about"].forEach(v=>{
     document.getElementById("view-"+v).classList.toggle("hidden", v!==state.tab);
   });
   if(state.tab==="dashboard") setTimeout(refresh, 0);
   if(state.tab==="peak" && state.peakRows.length === 0) loadPeak();
   if(state.tab==="ri") loadRi();
+  if(state.tab==="downloads") loadDownloads();
 });
 
 /* Filter chips (delegated, since category chips are rebuilt) */
@@ -1096,6 +1159,70 @@ document.getElementById("riApply").addEventListener("click", () => {
 document.getElementById("riBufferInput").addEventListener("keypress", e => {
   if(e.key === "Enter") document.getElementById("riApply").click();
 });
+
+/* ============== PR5 — Downloads tab ============== */
+async function loadDownloads(){
+  await Promise.all([loadQueues(), loadPolicies(), loadWorkbooksList()]);
+}
+
+async function loadQueues(){
+  try{
+    const data = await fetchJSON("/api/queues");
+    const body = document.querySelector("#queuesTable tbody");
+    const rows = data.owners || [];
+    const glyph = data.currency_glyph || state.currencyGlyph || "$";
+    body.innerHTML = rows.map(r => {
+      const ownerCls = r.owner === "needs-attribution" ? "high" : "low";
+      const safe = encodeURIComponent(r.owner);
+      return `<tr>
+        <td><span class="pill ${ownerCls}">${r.owner}</span></td>
+        <td class="right num">${r.count}</td>
+        <td class="right num">${glyph}${(r.monthly_savings||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+        <td class="right num">${glyph}${(r.annualised||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+        <td><a class="btn ghost" href="/api/queues/${safe}.md" download>Markdown</a></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5" class="small">No findings yet — load /api/findings first.</td></tr>`;
+    document.getElementById("queuesCount").textContent =
+      `${rows.length} owners · ${rows.reduce((a,r)=>a+r.count,0)} findings total`;
+  }catch(e){
+    setBanner(`Couldn't load queues: ${e.message}`, "warn");
+  }
+}
+
+async function loadPolicies(){
+  try{
+    const list = await fetchJSON("/api/policies");
+    const el = document.getElementById("policyList");
+    el.innerHTML = list.map(p => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="flex:1">
+            <div style="font-weight:600">${p.displayName}</div>
+            <div class="small">${p.description}</div>
+          </div>
+          <a class="btn ghost" href="/api/policies/${encodeURIComponent(p.slug)}.json" download>JSON</a>
+        </div>
+      </div>
+    `).join("");
+  }catch(e){
+    setBanner(`Couldn't load policies: ${e.message}`, "warn");
+  }
+}
+
+async function loadWorkbooksList(){
+  try{
+    const list = await fetchJSON("/api/workbooks");
+    const el = document.getElementById("workbookList");
+    el.innerHTML = list.map(w => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+        <div style="flex:1"><b>${w.displayName}</b> <span class="small mono">(${w.name})</span></div>
+        <a class="btn ghost" href="/api/workbooks/${encodeURIComponent(w.name)}.json" download>JSON</a>
+      </div>
+    `).join("");
+  }catch(e){
+    setBanner(`Couldn't load workbooks: ${e.message}`, "warn");
+  }
+}
 
 document.querySelectorAll("#findings thead th").forEach(th=>{
   th.addEventListener("click", ()=>{

@@ -5,11 +5,11 @@ Run with: ``pytest -q v1/tests``
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
 
-# Make `backend.*` importable when pytest is invoked from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("USE_MOCK_DATA", "true")
 os.environ.setdefault("TARGET_SUBSCRIPTION_ID", "00000000-0000-0000-0000-000000000000")
@@ -35,7 +35,6 @@ def test_findings_shape() -> None:
     assert "findings" in body
     assert "visibility_gap_pct" in body
     assert "total_savings_monthly_usd" in body
-    # PR2 — currency context surfaces on every response
     assert "currency_code" in body and len(body["currency_code"]) == 3
     assert "currency_glyph" in body and body["currency_glyph"]
     assert len(body["findings"]) > 0
@@ -50,7 +49,7 @@ def test_billing_endpoint() -> None:
     r = client.get("/api/billing")
     assert r.status_code == 200
     body = r.json()
-    assert body.get("currency_code") == "USD"  # mock-mode returns the stable USD context
+    assert body.get("currency_code") == "USD"
     assert body.get("glyph") == "$"
     assert body.get("source") in ("detected", "override", "fallback")
 
@@ -61,7 +60,6 @@ def test_peak_rightsizing_endpoint() -> None:
     body = r.json()
     assert "rows" in body and "summary" in body and "thresholds" in body
     assert body["summary"]["total_vms"] == len(body["rows"])
-    # Mock data has at least one advisor_unsafe row.
     assert body["summary"]["advisor_unsafe"] >= 1
 
 
@@ -70,31 +68,25 @@ def test_settings_get_and_post() -> None:
     assert r.status_code == 200
     t = r.json()
     assert "downsize_cpu_p95_max" in t
-    # Update one field
     r = client.post("/api/settings", json={"downsize_cpu_p95_max": 55.0})
     assert r.status_code == 200
     assert r.json()["downsize_cpu_p95_max"] == 55.0
-    # Invalid (downsize >= upsize) should 400
     r = client.post("/api/settings", json={"downsize_cpu_p95_max": 90.0})
     assert r.status_code == 400
-    # Reset
     client.post("/api/settings", json={"downsize_cpu_p95_max": 40.0})
 
 
 def test_ri_coverage_no_buffer() -> None:
-    """Without a buffer, the endpoint returns groups + buffer_required: true."""
     r = client.get("/api/ri-coverage")
     assert r.status_code == 200
     body = r.json()
     assert body["buffer_required"] is True
     assert body["shortlist"] == []
     assert len(body["groups"]) >= 1
-    # High-risk groups still surface so the operator sees what's deferred
     assert "rejected_high_risk" in body
 
 
 def test_ri_coverage_with_buffer() -> None:
-    """With a buffer, the endpoint computes a shortlist."""
     r = client.get("/api/ri-coverage?buffer=5000")
     assert r.status_code == 200
     body = r.json()
@@ -103,9 +95,7 @@ def test_ri_coverage_with_buffer() -> None:
     assert isinstance(body["shortlist"], list)
     assert isinstance(body["running_exposure"], (int, float))
     assert body["running_exposure"] <= 5000
-    # In mock data we expect at least one pick fitting in 5,000 buffer
     assert len(body["shortlist"]) >= 1
-    # Every shortlisted item is LOW or MEDIUM risk
     for g in body["shortlist"]:
         assert g["risk"] in ("LOW", "MEDIUM")
 
@@ -125,3 +115,59 @@ def test_script_download() -> None:
 def test_unknown_finding_404() -> None:
     r = client.get("/api/findings/does-not-exist/script")
     assert r.status_code == 404
+
+
+# ---- PR5 — queues / policies / workbooks -----------------------------------
+
+def test_queues_endpoint() -> None:
+    r = client.get("/api/queues")
+    assert r.status_code == 200
+    body = r.json()
+    assert "owners" in body and isinstance(body["owners"], list)
+    assert "currency_code" in body
+    assert len(body["owners"]) >= 1
+    o0 = body["owners"][0]
+    for key in ("owner", "count", "monthly_savings", "annualised"):
+        assert key in o0
+
+
+def test_queue_md_download() -> None:
+    owners = client.get("/api/queues").json()["owners"]
+    name = owners[0]["owner"]
+    r = client.get(f"/api/queues/{name}.md")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    assert name in r.text
+    assert "[ ] accept" in r.text
+
+
+def test_policies_list_and_download() -> None:
+    r = client.get("/api/policies")
+    assert r.status_code == 200
+    cats = r.json()
+    assert isinstance(cats, list) and len(cats) >= 5
+    slug = cats[0]["slug"]
+    r = client.get(f"/api/policies/{slug}.json")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    pol = json.loads(r.text)
+    assert pol["type"] == "Microsoft.Authorization/policyDefinitions"
+
+
+def test_policy_bundle_zip() -> None:
+    r = client.get("/api/policies/bundle.zip")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    assert len(r.content) > 500
+
+
+def test_workbooks_list_and_download() -> None:
+    r = client.get("/api/workbooks")
+    assert r.status_code == 200
+    items = r.json()
+    assert {i["name"] for i in items} == {"hidden-waste", "peak-rightsizing", "ri-coverage"}
+    name = items[0]["name"]
+    r = client.get(f"/api/workbooks/{name}.json")
+    assert r.status_code == 200
+    wb = json.loads(r.text)
+    assert wb.get("version") == "Notebook/1.0"

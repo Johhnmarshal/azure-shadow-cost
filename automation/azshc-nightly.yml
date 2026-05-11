@@ -1,0 +1,70 @@
+# Azure Shadow Cost — nightly remediation queue refresh.
+#
+# Runs at 05:00 UTC. Calls the deployed web app's /api/queues endpoint, then
+# opens or edits one tracker issue per owner with the per-owner Markdown
+# queue body. Re-running the workflow updates the same issues in place
+# (label-based dedupe).
+#
+# Required configuration:
+#
+#   1. Deploy the web app (see webapp/infra/deploy.sh) and note its URL.
+#   2. Add a repo secret AZSHC_BASE_URL pointing to the App Service hostname,
+#      e.g. https://azshc-abc123.azurewebsites.net
+#   3. (Optional) Add AAD Easy Auth on the App Service and pass a token via
+#      AZSHC_TOKEN repo secret. Without auth the workflow will only work in
+#      a single-tenant context and is not recommended past v0.
+
+name: azshc-nightly
+on:
+  schedule:
+    - cron: '0 5 * * *'   # 05:00 UTC every day
+  workflow_dispatch: {}    # manual trigger
+
+permissions:
+  issues: write          # create / edit per-owner queue issues
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      AZSHC_BASE_URL: ${{ secrets.AZSHC_BASE_URL }}
+      AZSHC_TOKEN:    ${{ secrets.AZSHC_TOKEN }}
+    steps:
+      - name: Sanity check inputs
+        run: |
+          if [ -z "$AZSHC_BASE_URL" ]; then
+            echo "::error::Set the AZSHC_BASE_URL repo secret before running."
+            exit 2
+          fi
+
+      - name: Fetch owner index
+        id: owners
+        run: |
+          set -euo pipefail
+          AUTH=()
+          if [ -n "$AZSHC_TOKEN" ]; then AUTH=(-H "Authorization: Bearer $AZSHC_TOKEN"); fi
+          curl -fsS "${AUTH[@]}" "$AZSHC_BASE_URL/api/queues" -o owners.json
+          jq -r '.owners[].owner' owners.json > owners.txt
+          echo "count=$(wc -l < owners.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Open or edit per-owner tracker issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r owner; do
+            [ -z "$owner" ] && continue
+            BODY=$(curl -fsS ${AZSHC_TOKEN:+-H "Authorization: Bearer $AZSHC_TOKEN"} \
+                "$AZSHC_BASE_URL/api/queues/$(printf '%s' "$owner" | jq -sRr @uri).md")
+            LABEL="azshc:owner=$owner"
+            EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number' || true)
+            TITLE="Azure Shadow Cost — $owner — $(date -u +%Y-%m-%d)"
+            if [ -n "$EXISTING" ]; then
+              echo "Editing issue #$EXISTING for $owner"
+              gh issue edit "$EXISTING" --title "$TITLE" --body "$BODY"
+            else
+              echo "Opening new issue for $owner"
+              gh issue create --title "$TITLE" --body "$BODY" --label "$LABEL"
+            fi
+          done < owners.txt
