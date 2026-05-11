@@ -2,16 +2,6 @@
 
 Use by setting ``USE_MOCK_DATA=true`` in your environment. The shapes mirror
 what the live detectors would return so the SPA renders identically.
-
-PR2: every mock finding now carries a ``cost_source`` so the SPA's pill
-renders without an Azure billing context. Values are spread across
-``actual``, ``mixed``, and ``estimate`` to exercise all three rendering paths.
-
-PR3: peak-rightsizing rollup Findings + per-VM detail rows.
-
-PR4: commitment_drift mock removed; replaced by ri_coverage GroupAnalysis +
-rollup. Buffer is hardcoded to 5,000 in the mock — the SPA's RI Coverage
-tab lets the operator override.
 """
 from __future__ import annotations
 
@@ -75,7 +65,6 @@ MOCK_FINDINGS: list[Finding] = [
         risk="Low", tier="Crawl",
         business_value="Largest source of unattributed compute spend; tag, then chargeback.",
     ),
-    # PR4: commitment_drift removed — replaced by ri_coverage (forward-looking).
     Finding(
         id="mock:storage_overprov",
         detector="storage_overprovisioned_redundancy",
@@ -107,14 +96,12 @@ MOCK_FINDINGS: list[Finding] = [
         owner="data-platform", env="nonprod",
         savings_monthly_usd=2250, cost_source="estimate", effort_hours=18,
         risk="Medium", tier="Walk",
-        business_value="Single-region writes are sufficient for non-prod. Multi-region adds 2–3x RU cost.",
+        business_value="Single-region writes are sufficient for non-prod. Multi-region adds 2-3x RU cost.",
     ),
 ]
 
 
-# ---------------------------------------------------------------------------
-# PR3 — Peak rightsizing rollups (appear in /api/findings)
-# ---------------------------------------------------------------------------
+# ---- PR3 — Peak rightsizing rollups -------------------------------------
 
 _PEAK_VM = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-mock/providers/Microsoft.Compute/virtualMachines"
 
@@ -129,10 +116,7 @@ MOCK_PEAK_ROLLUPS: list[Finding] = [
         owner="mixed", env="prod",
         savings_monthly_usd=0, cost_source="estimate", effort_hours=2,
         risk="High", tier="Walk", confidence="HIGH",
-        business_value=(
-            "Advisor's average-based logic would have downsized these VMs into a peak-hour outage. "
-            "This is the metric that pays for the engine — every avoided incident dwarfs years of savings."
-        ),
+        business_value="Advisor's average-based logic would have downsized these VMs into a peak-hour outage.",
     ),
     Finding(
         id="mock:peak_downsize",
@@ -147,29 +131,22 @@ MOCK_PEAK_ROLLUPS: list[Finding] = [
         owner="mixed", env="mixed",
         savings_monthly_usd=0, cost_source="estimate", effort_hours=2,
         risk="Medium", tier="Walk", confidence="HIGH",
-        business_value=(
-            "Downsize ladder one step per VM; never skip steps. Coordinate maintenance window — resize "
-            "triggers a reboot. Aim for a 7-day baseline + 7-day post-change soak per batch."
-        ),
+        business_value="Downsize ladder one step per VM; never skip steps.",
     ),
     Finding(
         id="mock:peak_upsize",
         detector="peak_upsize",
         category="Rightsizing",
-        resource="1 VM at peak saturation — upsize candidate",
+        resource="1 VM at peak saturation - upsize candidate",
         resource_ids=[f"{_PEAK_VM}/vm-billing-svc-01"],
         owner="billing-team", env="prod",
         savings_monthly_usd=0, cost_source="estimate", effort_hours=1,
         risk="High", tier="Walk", confidence="HIGH",
-        business_value=(
-            "P95 sustained above the upsize floor. Review for upsize, autoscale group expansion, "
-            "or workload split before users start noticing."
-        ),
+        business_value="P95 sustained above the upsize floor. Review for upsize before users notice.",
     ),
 ]
 
 
-# Per-VM detail rows for the SPA's Peak Rightsizing tab.
 MOCK_PEAK_DETAILS: list[dict] = [
     {
         "id": f"{_PEAK_VM}/vm-batch-night-04", "name": "vm-batch-night-04",
@@ -251,19 +228,15 @@ MOCK_PEAK_DETAILS: list[dict] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# PR4 — RI/SP coverage groups + rollup
-# ---------------------------------------------------------------------------
+# ---- PR4 — RI/SP coverage groups + rollup --------------------------------
 
-# Synthetic 3-month PAYG VM consumption per (family, region). CV-ranges chosen
-# to land one group in each stability bucket: STABLE / VARIABLE / UNSTABLE.
 _MOCK_RI_GROUPS_RAW: list[tuple[str, str, list[float]]] = [
-    ("Dsv5 Series",  "uksouth", [18000.0, 17800.0, 18200.0]),  # CV ~0.01 — STABLE
-    ("Esv5 Series",  "uksouth", [14500.0, 15000.0, 14800.0]),  # STABLE
-    ("Bs Series",    "uksouth", [6300.0,  6500.0,  6400.0]),   # STABLE
-    ("Fsv2 Series",  "westeu",  [2100.0,  2400.0,  2200.0]),   # STABLE/VARIABLE
-    ("Dasv5 Series", "uksouth", [9500.0,  11000.0, 13000.0]),  # VARIABLE
-    ("Mv2 Series",   "uksouth", [4000.0,  1500.0,  8000.0]),   # UNSTABLE
+    ("Dsv5 Series",  "uksouth", [18000.0, 17800.0, 18200.0]),
+    ("Esv5 Series",  "uksouth", [14500.0, 15000.0, 14800.0]),
+    ("Bs Series",    "uksouth", [6300.0,  6500.0,  6400.0]),
+    ("Fsv2 Series",  "westeu",  [2100.0,  2400.0,  2200.0]),
+    ("Dasv5 Series", "uksouth", [9500.0,  11000.0, 13000.0]),
+    ("Mv2 Series",   "uksouth", [4000.0,  1500.0,  8000.0]),
 ]
 
 
@@ -273,9 +246,6 @@ MOCK_RI_GROUPS = [
 ]
 
 
-# A single rollup Finding for the dashboard. Pre-computed from the synthetic
-# 5,000-buffer pack; numbers match the buffer-bounded shortlist of
-# {Dsv5, Esv5, Bs, Fsv2} (the four LOW-risk groups).
 MOCK_RI_ROLLUPS: list[Finding] = [
     Finding(
         id="mock:ri_coverage",
@@ -292,10 +262,8 @@ MOCK_RI_ROLLUPS: list[Finding] = [
         savings_monthly_usd=820, cost_source="actual", effort_hours=4,
         risk="Medium", tier="Walk", confidence="HIGH",
         business_value=(
-            "Commit only what fits inside your cancellation-exposure buffer. The binding "
-            "constraint is procurement policy, not the data — raise the buffer to unlock "
-            "the rejected list, but never reserve a workload that should be downsized first "
-            "(cross-check against Peak Rightsizing)."
+            "Commit only what fits inside your cancellation-exposure buffer. "
+            "The binding constraint is procurement policy, not the data."
         ),
     ),
 ]

@@ -144,10 +144,26 @@ naming explicitly because they shape every PR:
 | GET | `/api/settings` | Current peak-rightsizing thresholds (PR3) |
 | POST | `/api/settings` | Atomic threshold update (PR3) |
 | GET | `/api/ri-coverage` | RI/SP coverage analysis with optional `?buffer` (PR4) |
+| GET | `/api/queues` | Per-owner queue index — counts + savings totals (PR5) |
+| GET | `/api/queues/{owner}.md` | Per-owner Markdown queue download (PR5) |
+| GET | `/api/policies` | Catalogue of audit-mode Policy starter pack (PR5) |
+| GET | `/api/policies/{slug}.json` | Single policy JSON download (PR5) |
+| GET | `/api/policies/bundle.zip` | All policies + README in a zip (PR5) |
+| GET | `/api/workbooks` | Catalogue of Azure Workbook templates (PR5) |
+| GET | `/api/workbooks/{name}.json` | Single Workbook JSON download (PR5) |
 | POST | `/api/cache/invalidate` | Drop the in-memory cache |
 
-PR5 adds `/api/queues/{owner}.md`,
-`/api/policies/{category}.json`, and `/api/workbooks/{name}.json`.
+## Owner attribution (PR5)
+
+Findings route to a single owner via three-tier precedence:
+**Azure Tag → YAML override (`AZSHC_OWNERS_YAML`) → CODEOWNERS (`AZSHC_CODEOWNERS`)**.
+Resources that match nothing land in the `needs-attribution` queue —
+that's by design; it's the FinOps team's signal that tagging is broken
+in some corner of the tenant.
+
+A reference YAML mapping ships at
+[`backend/owners_example.yaml`](backend/owners_example.yaml). Copy to
+`backend/owners.yaml` (or any path) and point `AZSHC_OWNERS_YAML` at it.
 
 ## Peak rightsizing (PR3)
 

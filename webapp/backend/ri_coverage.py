@@ -10,10 +10,6 @@ into the operator-specified refund buffer.
 Buffer is **explicit only**: passed via ``?buffer=`` on /api/ri-coverage, or
 seeded from ``AZSHC_REFUND_BUFFER`` env var. No default. If unset, the
 endpoint returns ``buffer_required: true`` and the SPA prompts.
-
-Replaces the deprecated ``commitment_drift`` detector. Existing-reservation
-utilization is a separate concern; it can return as its own detector after
-PR5 once Reservations Reader RBAC is widely granted.
 """
 from __future__ import annotations
 
@@ -39,13 +35,11 @@ Stability = Literal["STABLE", "VARIABLE", "UNSTABLE"]
 RiskBand  = Literal["LOW", "MEDIUM", "HIGH"]
 
 
-# ---- Tunables — open-source FinOps Engine convention ---------------------
-
 STABLE_CV_MAX:    float = 0.15
 VARIABLE_CV_MAX:  float = 0.30
-RI_1Y_SAVINGS:    float = 0.30   # blended; confirm per-SKU at commit time
+RI_1Y_SAVINGS:    float = 0.30
 SP_1Y_SAVINGS:    float = 0.17
-CANCEL_FEE_PCT:   float = 0.12   # Microsoft's current cancellation fee
+CANCEL_FEE_PCT:   float = 0.12
 
 _COMMIT_PCT: dict[Stability, float] = {
     "STABLE":   0.80,
@@ -53,8 +47,6 @@ _COMMIT_PCT: dict[Stability, float] = {
     "UNSTABLE": 0.30,
 }
 
-
-# ---- Pure analytics ------------------------------------------------------
 
 @dataclass(frozen=True)
 class GroupAnalysis:
@@ -76,7 +68,6 @@ class GroupAnalysis:
 
 
 def cv(values: list[float]) -> tuple[float, float, float]:
-    """Mean, stddev (population), coefficient of variation. cv=0 if mean<=0."""
     if not values:
         return (0.0, 0.0, 0.0)
     mean = statistics.mean(values)
@@ -87,16 +78,14 @@ def cv(values: list[float]) -> tuple[float, float, float]:
 
 
 def classify(cv_value: float) -> tuple[Stability, RiskBand, str, float]:
-    """Map CV to (stability, risk, product label, savings rate)."""
     if cv_value < STABLE_CV_MAX:
-        return ("STABLE",   "LOW",    "VM RI 1Y",                    RI_1Y_SAVINGS)
+        return ("STABLE",   "LOW",    "VM RI 1Y", RI_1Y_SAVINGS)
     if cv_value < VARIABLE_CV_MAX:
-        return ("VARIABLE", "MEDIUM", "Compute SP 1Y",               SP_1Y_SAVINGS)
-    return     ("UNSTABLE", "HIGH",   "Compute SP 1Y (deferred)",    SP_1Y_SAVINGS)
+        return ("VARIABLE", "MEDIUM", "Compute SP 1Y", SP_1Y_SAVINGS)
+    return     ("UNSTABLE", "HIGH",   "Compute SP 1Y (deferred)", SP_1Y_SAVINGS)
 
 
 def analyse_group(family: str, region: str, monthly_costs: list[float]) -> GroupAnalysis:
-    """Pure: family × region monthly costs → fully-decided GroupAnalysis."""
     mean, stddev, cv_v = cv(monthly_costs)
     stability, risk, product, savings_rate = classify(cv_v)
     commit_pct = _COMMIT_PCT[stability]
@@ -121,12 +110,6 @@ def analyse_group(family: str, region: str, monthly_costs: list[float]) -> Group
 
 
 def build_shortlist(groups: list[GroupAnalysis], buffer: float) -> dict:
-    """Greedy-pack LOW + MEDIUM risk groups by descending annual savings.
-
-    HIGH-risk (UNSTABLE) groups are excluded from the buffer pack — they're
-    surfaced as a separate "deferred" list with the rationale that 1-3yr
-    commitments would lock in current volatility.
-    """
     eligible = sorted(
         [g for g in groups if g.risk in ("LOW", "MEDIUM")],
         key=lambda g: -g.annual_savings,
@@ -154,7 +137,6 @@ def build_shortlist(groups: list[GroupAnalysis], buffer: float) -> dict:
 
 
 def env_buffer() -> float | None:
-    """Read AZSHC_REFUND_BUFFER. Returns None if unset, blank, or invalid."""
     raw = os.environ.get("AZSHC_REFUND_BUFFER", "").strip()
     if not raw:
         return None
@@ -165,10 +147,7 @@ def env_buffer() -> float | None:
         return None
 
 
-# ---- Azure adapter -------------------------------------------------------
-
 async def _payg_consumption(months: int = 3) -> list[GroupAnalysis]:
-    """One Cost Management /query call → grouped GroupAnalysis list."""
     sub = settings().target_subscription_id
     if not sub:
         return []
@@ -239,8 +218,6 @@ async def _payg_consumption(months: int = 3) -> list[GroupAnalysis]:
     return await cache.get_or_fetch("ri_coverage:groups", _fetch, ttl_override=3600)
 
 
-# ---- Public API ----------------------------------------------------------
-
 def to_dict(g: GroupAnalysis) -> dict:
     return {
         "family": g.family, "region": g.region,
@@ -260,7 +237,6 @@ def to_dict(g: GroupAnalysis) -> dict:
 
 
 async def ri_coverage_details(buffer: float | None) -> dict:
-    """Detailed analysis. The SPA's RI Coverage tab calls this."""
     if settings().use_mock_data:
         from . import mock_data
         groups = list(mock_data.MOCK_RI_GROUPS)
@@ -290,12 +266,6 @@ async def ri_coverage_details(buffer: float | None) -> dict:
 
 
 async def detect_ri_coverage() -> list[Finding]:
-    """One rollup Finding for the dashboard.
-
-    Buffer comes from AZSHC_REFUND_BUFFER env var; if unset the rollup is
-    suppressed (interactive setting via the SPA's RI Coverage tab is the
-    expected path for an operator to opt in).
-    """
     if settings().use_mock_data:
         from . import mock_data
         return list(mock_data.MOCK_RI_ROLLUPS)
@@ -322,10 +292,8 @@ async def detect_ri_coverage() -> list[Finding]:
         effort_hours=4,
         risk="Medium", tier="Walk", confidence="HIGH",
         business_value=(
-            "Commit only what fits inside your cancellation-exposure buffer. The binding "
-            "constraint is procurement policy, not the data — raise the buffer to unlock "
-            "the rejected list, but never reserve a workload that should be downsized first "
-            "(cross-check against Peak Rightsizing)."
+            "Commit only what fits inside your cancellation-exposure buffer. "
+            "The binding constraint is procurement policy, not the data."
         ),
     )]
 

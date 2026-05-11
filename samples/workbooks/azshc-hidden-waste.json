@@ -1,0 +1,58 @@
+{
+  "version": "Notebook/1.0",
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json",
+  "items": [
+    {
+      "type": 1,
+      "name": "title",
+      "content": {
+        "json": "# Azure Shadow Cost — Hidden Waste\n\nSeven recurring waste classes that Advisor under-reports or misses, priced from Cost Management actuals. Source: Azure Shadow Cost (CSV uploaded as Log Analytics custom table `HiddenWaste_CL`)."
+      }
+    },
+    {
+      "type": 9,
+      "name": "params",
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "p_workspace",
+            "version": "KqlParameterItem/1.0",
+            "name": "Workspace",
+            "type": 5,
+            "isRequired": true,
+            "typeSettings": {
+              "resourceTypeFilter": { "microsoft.operationalinsights/workspaces": true }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "section_category",
+      "content": { "json": "## By category" }
+    },
+    {
+      "type": 3,
+      "name": "category_chart",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "HiddenWaste_CL\n| where TimeGenerated > ago(7d)\n| summarize MonthlyGBP=sum(monthly_gbp_d) by Category=category_s\n| order by MonthlyGBP desc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      }
+    },
+    {
+      "type": 1,
+      "name": "footer",
+      "content": {
+        "json": "---\n\n_Source: Azure Shadow Cost — `webapp/backend/`. The web app exports this workbook on demand via /api/workbooks/hidden-waste.json._"
+      }
+    }
+  ],
+  "fallbackResourceIds": [],
+  "fromTemplateId": "azshc-hidden-waste"
+}

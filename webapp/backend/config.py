@@ -43,6 +43,17 @@ class Settings:
     use_mock_data: bool = field(
         default_factory=lambda: os.environ.get("USE_MOCK_DATA", "false").lower() == "true"
     )
+    # PR5 — Context enricher: owner-resolution overrides.
+    # Path to a YAML mapping (subscription / RG / type → owner). Optional;
+    # an empty string disables. The shipped example sits at backend/owners_example.yaml.
+    owners_yaml_path: str = field(
+        default_factory=lambda: os.environ.get("AZSHC_OWNERS_YAML", "")
+    )
+    # Path to a CODEOWNERS-style file. First-match-wins against the resource
+    # ID (treated as a path). Optional; empty string disables.
+    codeowners_path: str = field(
+        default_factory=lambda: os.environ.get("AZSHC_CODEOWNERS", "")
+    )
 
 
 @lru_cache(maxsize=1)
