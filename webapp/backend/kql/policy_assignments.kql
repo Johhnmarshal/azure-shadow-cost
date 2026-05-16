@@ -1,0 +1,30 @@
+// Cost-category Azure Policy assignments + their definition metadata.
+//
+// We deliberately filter to ``category == 'Cost'`` so the Guardrails view
+// stays focused on FinOps concerns. Security / identity policies are owned
+// by other functions and would clutter the surface.
+PolicyResources
+| where type =~ 'microsoft.authorization/policyassignments'
+| extend definitionId    = tostring(properties.policyDefinitionId)
+| extend enforcementMode = tolower(tostring(properties.enforcementMode))
+| extend assignmentName  = tostring(name)
+| extend assignmentDisplay = tostring(properties.displayName)
+| extend scope           = tostring(properties.scope)
+| extend params          = tostring(properties.parameters)
+// Look up the referenced definition (custom or built-in) for category + name.
+| join kind=leftouter (
+    PolicyResources
+    | where type in~ (
+        'microsoft.authorization/policydefinitions',
+        'microsoft.authorization/policysetdefinitions'
+    )
+    | extend definitionId    = tostring(id)
+    | extend defDisplayName  = tostring(properties.displayName)
+    | extend defCategory     = tostring(properties.metadata.category)
+    | project definitionId, defDisplayName, defCategory
+  ) on definitionId
+| where isnotempty(defCategory) and tolower(defCategory) == 'cost'
+| extend effectiveDisplayName = coalesce(assignmentDisplay, defDisplayName, assignmentName)
+| project id, assignmentName, effectiveDisplayName, enforcementMode, scope,
+          definitionId, defCategory, params
+| order by effectiveDisplayName asc

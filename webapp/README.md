@@ -151,6 +151,9 @@ naming explicitly because they shape every PR:
 | GET | `/api/policies/bundle.zip` | All policies + README in a zip (PR5) |
 | GET | `/api/workbooks` | Catalogue of Azure Workbook templates (PR5) |
 | GET | `/api/workbooks/{name}.json` | Single Workbook JSON download (PR5) |
+| GET | `/api/guardrails` | Policy Insights + derived FinOps guardrails (PR6) |
+| GET | `/api/guardrails/violations` | Warning + critical guardrails as actionable rows (PR6) |
+| GET | `/api/guardrails/summary` | KPI rollup — total / enforced / healthy / warning / critical / violations (PR6) |
 | POST | `/api/cache/invalidate` | Drop the in-memory cache |
 
 ## Owner attribution (PR5)

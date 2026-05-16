@@ -267,3 +267,80 @@ MOCK_RI_ROLLUPS: list[Finding] = [
         ),
     ),
 ]
+
+
+# ---- PR6 — Policy Insights guardrails (mock) -----------------------------
+
+# Built lazily so importing this module doesn't drag guardrails in unless used.
+def _build_mock_policy_guardrails():
+    from . import guardrails as _g
+    return [
+        _g.Guardrail(
+            id="policy:/subscriptions/00000000-.../providers/microsoft.authorization/policyassignments/azshc-deny-untagged",
+            name="Audit: resources missing required allocation tags",
+            category="Policy",
+            description="Azure Policy assignment — Cost category.",
+            severity="low",
+            status="healthy",
+            enforcement="audit",
+            current_value="0 non-compliant of 2,412",
+            current_numeric=0.0,
+            threshold="0 non-compliant",
+            threshold_numeric=0.0,
+            impact_monthly=0.0,
+            source="Azure Policy Insights",
+            last_evaluated="2026-05-12T04:00:00+00:00",
+        ),
+        _g.Guardrail(
+            id="policy:/subscriptions/00000000-.../providers/microsoft.authorization/policyassignments/azshc-deny-unattached-disks",
+            name="Audit: unattached managed disks",
+            category="Policy",
+            description="Azure Policy assignment — Cost category.",
+            severity="medium",
+            status="warning",
+            enforcement="audit",
+            current_value="612 non-compliant of 2,412",
+            current_numeric=612.0,
+            threshold="0 non-compliant",
+            threshold_numeric=0.0,
+            impact_monthly=0.0,
+            source="Azure Policy Insights",
+            last_evaluated="2026-05-12T04:00:00+00:00",
+        ),
+        _g.Guardrail(
+            id="policy:/subscriptions/00000000-.../providers/microsoft.authorization/policyassignments/azshc-restrict-storage-redundancy-nonprod",
+            name="Audit: non-prod storage on geo/zone redundancy",
+            category="Policy",
+            description="Azure Policy assignment — Cost category.",
+            severity="high",
+            status="critical",
+            enforcement="enforced",
+            current_value="38 non-compliant of 156",
+            current_numeric=38.0,
+            threshold="0 non-compliant",
+            threshold_numeric=0.0,
+            impact_monthly=0.0,
+            source="Azure Policy Insights",
+            last_evaluated="2026-05-12T04:00:00+00:00",
+        ),
+        _g.Guardrail(
+            id="policy:/subscriptions/00000000-.../providers/microsoft.authorization/policyassignments/azshc-cap-log-analytics-retention",
+            name="Audit: Log Analytics retention > 90 days",
+            category="Policy",
+            description="Azure Policy assignment — Cost category.",
+            severity="low",
+            status="healthy",
+            enforcement="audit",
+            current_value="no evaluations yet",
+            current_numeric=0.0,
+            threshold="0 non-compliant",
+            threshold_numeric=0.0,
+            impact_monthly=0.0,
+            source="Azure Policy Insights",
+            last_evaluated=None,
+        ),
+    ]
+
+
+# Lazy module-level constant; guardrails.fetch_policy_state() consumes it.
+MOCK_POLICY_GUARDRAILS = _build_mock_policy_guardrails()
