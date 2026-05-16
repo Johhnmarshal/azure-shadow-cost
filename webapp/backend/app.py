@@ -19,6 +19,9 @@ GET  /api/policies/{slug}.json        Download one policy JSON (PR5).
 GET  /api/policies/bundle.zip         Download the whole pack zipped (PR5).
 GET  /api/workbooks                   List shipping Azure Workbook templates (PR5).
 GET  /api/workbooks/{name}.json       Download one workbook template (PR5).
+GET  /api/guardrails                  Policy Insights + derived guardrails (PR6).
+GET  /api/guardrails/violations       Warning + critical guardrails as actionable rows (PR6).
+GET  /api/guardrails/summary          KPI rollup for the Dashboard tile (PR6).
 POST /api/cache/invalidate            Drops the in-memory cache (auth-gate this in v1.1).
 
 Static SPA is mounted at "/" from ../frontend.
@@ -39,6 +42,7 @@ from . import (
     billing,
     detectors,
     enricher,
+    guardrails,
     mock_data,
     peak_rightsizing,
     policy_pack,
@@ -325,6 +329,34 @@ async def get_workbook(name: str) -> Response:
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="azshc-{name}.workbook.json"'},
     )
+
+
+# ---- PR6 — Guardrails (Policy Insights + derived) -------------------------
+
+async def _findings_with_gap() -> tuple[list[Finding], float]:
+    items = await _findings()
+    return items, detectors.visibility_gap_pct(items)
+
+
+@app.get("/api/guardrails")
+async def get_guardrails() -> list[dict]:
+    items, gap = await _findings_with_gap()
+    rows = await guardrails.all_guardrails(items, gap)
+    return [guardrails.to_dict(g) for g in rows]
+
+
+@app.get("/api/guardrails/violations")
+async def get_guardrail_violations() -> list[dict]:
+    items, gap = await _findings_with_gap()
+    rows = await guardrails.violations(items, gap)
+    return [guardrails.to_dict(v) for v in rows]
+
+
+@app.get("/api/guardrails/summary")
+async def get_guardrail_summary() -> dict:
+    items, gap = await _findings_with_gap()
+    s = await guardrails.summary(items, gap)
+    return guardrails.to_dict(s)
 
 
 # ---- Cache control --------------------------------------------------------

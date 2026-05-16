@@ -171,3 +171,44 @@ def test_workbooks_list_and_download() -> None:
     assert r.status_code == 200
     wb = json.loads(r.text)
     assert wb.get("version") == "Notebook/1.0"
+
+
+# ---- PR6 — guardrails ------------------------------------------------------
+
+def test_guardrails_endpoint_shape() -> None:
+    r = client.get("/api/guardrails")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    # Always at least the four derived guardrails + the mocked policy ones.
+    assert len(body) >= 4
+    g0 = body[0]
+    for key in ("id", "name", "category", "severity", "status", "enforcement",
+                "current_value", "impact_monthly", "source"):
+        assert key in g0, f"missing {key}"
+    assert g0["status"] in ("healthy", "warning", "critical")
+    assert g0["enforcement"] in ("audit", "enforced", "disabled", "not-applicable")
+
+
+def test_guardrails_violations_endpoint() -> None:
+    r = client.get("/api/guardrails/violations")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    # Mock data has at least one warning/critical guardrail.
+    for v in body:
+        for key in ("id", "guardrail_id", "title", "severity",
+                    "cost_impact", "owner", "recommendation", "date"):
+            assert key in v
+
+
+def test_guardrails_summary_endpoint() -> None:
+    r = client.get("/api/guardrails/summary")
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("total_guardrails", "enforced", "healthy", "warning",
+                "critical", "violations", "high_severity_violations",
+                "overall_health"):
+        assert key in body
+    assert body["total_guardrails"] >= 4
+    assert body["overall_health"] in ("healthy", "warning", "critical")

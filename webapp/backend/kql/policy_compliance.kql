@@ -1,0 +1,18 @@
+// Per-assignment compliance counts.
+//
+// ``microsoft.policyinsights/policystates`` is the latest-state projection;
+// one row per (resource, assignment, definition). We summarise to get
+// compliant / non-compliant counts per assignment so the Guardrails view
+// can show "X non-compliant" without paging every state row to the SPA.
+PolicyResources
+| where type =~ 'microsoft.policyinsights/policystates'
+| extend assignmentId = tostring(properties.policyAssignmentId)
+| extend complianceState = tostring(properties.complianceState)
+| extend timestamp = todatetime(properties.timestamp)
+| summarize
+    compliant     = countif(complianceState =~ 'Compliant'),
+    nonCompliant  = countif(complianceState =~ 'NonCompliant'),
+    total         = count(),
+    lastEvaluated = max(timestamp)
+    by assignmentId
+| project assignmentId, compliant, nonCompliant, total, lastEvaluated
