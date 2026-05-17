@@ -44,7 +44,7 @@
   .btn.ghost:hover{color:#fff;border-color:var(--accent)}
 
   /* KPI cards */
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:14px 0 20px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:14px 0 20px}
   .kpi{background:linear-gradient(180deg,var(--panel),var(--panel2));
     border:1px solid var(--line);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
   .kpi .label{color:var(--ink-mute);font-size:11.5px;text-transform:uppercase;letter-spacing:.7px}
@@ -209,6 +209,15 @@
         <div class="label">12-mo savings potential</div>
         <div class="value" id="kpi-save">—</div>
         <div class="sub">if all recommendations applied</div>
+        <div class="bar"></div>
+      </div>
+      <div class="kpi" id="kpi-guardrails" role="button" tabindex="0"
+           title="Click to open the Guardrails tab"
+           style="cursor:pointer">
+        <div class="label">Guardrails health</div>
+        <div class="value" id="kpi-gr-headline">—</div>
+        <div class="sub" id="kpi-gr-sub">Policy Insights + derived signals</div>
+        <span class="trend" id="kpi-gr-trend">—</span>
         <div class="bar"></div>
       </div>
     </div>
@@ -714,10 +723,44 @@ async function loadFindings(){
     rebuildCategoryChips();
     setBanner("");
     refresh();
+    loadGuardrailsSummary();   // PR6b — fire-and-forget; failure is non-blocking
   }catch(e){
     setBanner(`Failed to load findings: ${e.message}`, "warn");
   }
 }
+
+/* ============== PR6b — Guardrails KPI on Dashboard ============== */
+async function loadGuardrailsSummary(){
+  const headlineEl = document.getElementById("kpi-gr-headline");
+  const subEl      = document.getElementById("kpi-gr-sub");
+  const trendEl    = document.getElementById("kpi-gr-trend");
+  try{
+    const s = await fetchJSON("/api/guardrails/summary");
+    headlineEl.textContent = `${s.violations || 0} · ${s.enforced || 0}`;
+    subEl.textContent = `${s.violations || 0} violations · ${s.enforced || 0} of ${s.total_guardrails || 0} enforced`;
+    const cls = s.overall_health === "critical" ? "up"
+              : s.overall_health === "warning"  ? "up"
+              :                                   "down";
+    trendEl.className = "trend " + cls;
+    trendEl.textContent = s.overall_health || "—";
+  }catch(e){
+    headlineEl.textContent = "—";
+    subEl.textContent = "guardrails offline";
+    trendEl.textContent = "";
+    trendEl.className = "trend";
+  }
+}
+
+/* Click-through to the (future) Guardrails tab. Until PR6c lands the tab
+ * doesn't exist; we look for it gracefully and fall back to a noop banner. */
+document.getElementById("kpi-guardrails").addEventListener("click", () => {
+  const target = document.querySelector('#tabs .tab[data-tab="guardrails"]');
+  if (target) { target.click(); return; }
+  setBanner("Guardrails tab arrives in PR6c. Backend live at /api/guardrails*.", "info");
+});
+document.getElementById("kpi-guardrails").addEventListener("keypress", e => {
+  if (e.key === "Enter" || e.key === " ") document.getElementById("kpi-guardrails").click();
+});
 
 function rebuildCategoryChips(){
   const cats = [...new Set(state.findings.map(f=>f.category))].sort();

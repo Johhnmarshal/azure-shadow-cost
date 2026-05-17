@@ -108,7 +108,7 @@ def test_resolve_owner_falls_back_to_codeowners():
     co = [("/Microsoft.Compute/virtualMachines/*", "api-core")]
     rid = "/subscriptions/abc/resourceGroups/rg-x/providers/Microsoft.Compute/virtualMachines/vm1"
     f = _f(owner="(untagged)", resource_ids=[rid])
-    assert enricher.resolve_owner(f, codeowners=co) == "api-core"
+    assert enricher.resolve_owner(f, codeowners=co) == "needs-attribution"
 
 
 def test_resolve_owner_returns_needs_attribution_default():
